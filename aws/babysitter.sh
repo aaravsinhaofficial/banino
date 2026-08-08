@@ -16,10 +16,12 @@ declare -A SPEC=(
   [fs_doors_a3c]="a3c $TARGET contributed/dmlab30/explore_obstructed_goals_small"
 )
 done_cell() {  # true once synced metrics show >= TARGET frames
-  aws s3 cp "s3://banino-repro-975050064729/rl_runs/$1/results.tar.gz" - 2>/dev/null \
+  local frames
+  frames=$(aws s3 cp "s3://banino-repro-975050064729/rl_runs/$1/results.tar.gz" - 2>/dev/null \
     | tar xzO "$1/metrics.jsonl" 2>/dev/null | tail -1 \
-    | grep -o '"frames": [0-9]*' | grep -o '[0-9]*' \
-    | awk -v t=$TARGET '{exit !($1 >= t)}'
+    | grep -o '"frames": [0-9]*' | grep -o '[0-9]*$' | tail -1)
+  # No synced state or no parsable frame count => NOT done.
+  [ -n "$frames" ] && [ "$frames" -ge "$TARGET" ]
 }
 while true; do
   for name in "${!SPEC[@]}"; do
