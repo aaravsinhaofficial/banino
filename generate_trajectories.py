@@ -45,7 +45,13 @@ import multiprocessing
 import os
 
 import numpy as np
-import tensorflow as tf
+
+# TensorFlow is only needed for TFRecord writing; the simulator itself is
+# pure numpy so the modern (PyTorch) code can import it without TF installed.
+try:
+  import tensorflow as tf
+except ImportError:
+  tf = None
 
 # Motion-model parameters (Banino et al. 2018 Supplementary Methods Table 1,
 # after Raudies & Hasselmo 2012).
