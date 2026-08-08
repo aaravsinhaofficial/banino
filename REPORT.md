@@ -78,6 +78,27 @@ frames** (1.5–3 % of the paper's scale) on the real DeepMind Lab tasks:
   the paper's grid > place-cell > A3C ordering emerged over hundreds of
   millions of frames.
 
+### Warm-start experiment (added after the overnight runs)
+
+A follow-up tested whether the *supervised* grid network can be transplanted
+into the agent: the RL grid module was initialised from the best supervised
+checkpoint (21 % grid units, 19.3 cm decode; velocity input re-encoded to the
+supervised convention, visual-code input columns zeroed, place-cell ensembles
+aligned at ±1.1 m) and trained 20 M frames on the goal maze
+(fig_warmstart_returns.png). Outcome, honestly read from full curves:
+
+- **No clear navigational advantage at this scale.** All four agents (warm
+  grid, scratch grid, place-cell, A3C) reach return ≈ 5–6 within 1–2 M frames
+  and end in the same noisy 4–6 band (tail averages 4.9–6.2). The warm agent
+  posts the highest transient peak of any run (≈ 8.8 at 7–8 M frames vs 7.9
+  for the best baseline), which is suggestive but n=1.
+- The transferred representation survives fine-tuning (maze grid fraction
+  4.1 % vs ≈ 2 % from scratch; positive mean grid score), but the goal
+  vector remains undecodable (R² ≤ 0, direction error 88° ≈ chance).
+- Interpretation: a pretrained path integrator is not the binding
+  constraint at 2×10⁷ frames — the paper's separation presumably needs the
+  10⁸–10⁹-frame regime regardless of how good the spatial code is.
+
 **Verdict:** the RL half is *runnable and instrumented* end-to-end
 (environment, all three agents, grid-ness and goal-decoding analyses), and
 the overnight-scale results are cleanly **negative in the directions the
