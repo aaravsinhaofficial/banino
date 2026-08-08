@@ -1,0 +1,8 @@
+# Pinned environment for the grid-cells code (see Dockerfile for the
+# recommended way to run — these packages need Python 3.6/3.7).
+tensorflow==1.15.5
+dm-sonnet==1.36
+tensorflow-probability==0.8.0
+scipy==1.5.4
+matplotlib==3.3.4
+numpy==1.18.5
