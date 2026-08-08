@@ -59,6 +59,16 @@ def main():
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--seed', type=int, default=1)
+  ap.add_argument('--resume', action='store_true',
+                  help='Resume from <out>/resume.pt if present (models, '
+                       'optimizers, frame/update counters; replay restarts '
+                       'warm).')
+  ap.add_argument('--arena_cells', type=int, default=11,
+                  help='Maze frame size in cells (13 for square_arena_goal); '
+                       'sets the position-centring offset in the env.')
+  ap.add_argument('--pc_scale', type=float, default=0.1,
+                  help='Place-cell scale for the agent ensembles (m). SI '
+                       'Table 2 lists 40 engine units = 0.1 m.')
   ap.add_argument('--init_grid_from', default=None,
                   help='Supervised GridNetwork checkpoint to warm-start the '
                        'grid module from (velocity columns + recurrent '
@@ -81,7 +91,9 @@ def main():
 
   n = args.n_envs
   venv = SubprocVecEnv(n, args.level, base_seed=args.seed * 1000,
-                       fake=args.fake)
+                       fake=args.fake,
+                       env_kwargs=dict(arena_cells=args.arena_cells,
+                                       cell_m=0.25) if not args.fake else None)
 
   step_dt = args.action_repeat / 60.0  # seconds per decision step
 
@@ -100,6 +112,7 @@ def main():
   obs = encode_vel(venv.reset_all())
 
   pc_ens = targets_lib.PlaceCellEnsemble(
+      stdev=args.pc_scale,
       pos_min=-args.arena_half_m, pos_max=args.arena_half_m, device=dev)
   hd_ens = targets_lib.HeadDirectionCellEnsemble(device=dev)
 
@@ -144,6 +157,31 @@ def main():
 
   frames_done = 0
   update = 0
+  resume_path = os.path.join(args.out, 'resume.pt')
+  if args.resume and os.path.exists(resume_path):
+    st = torch.load(resume_path, map_location=dev)
+    vision.load_state_dict(st['vision'])
+    grid.load_state_dict(st['grid'])
+    policy.load_state_dict(st['policy'])
+    vis_opt.load_state_dict(st['vis_opt'])
+    grid_opt.load_state_dict(st['grid_opt'])
+    pol_opt.load_state_dict(st['pol_opt'])
+    frames_done = st['frames_done']
+    update = st['update']
+    next_episode = st['next_episode']
+    print(f'resumed at frames={frames_done} update={update}', flush=True)
+
+  def save_resume():
+    tmp = resume_path + '.tmp'
+    torch.save(dict(vision=vision.state_dict(), grid=grid.state_dict(),
+                    policy=policy.state_dict(),
+                    vis_opt=vis_opt.state_dict(),
+                    grid_opt=grid_opt.state_dict(),
+                    pol_opt=pol_opt.state_dict(),
+                    frames_done=frames_done, update=update,
+                    next_episode=int(next_episode)), tmp)
+    os.replace(tmp, resume_path)
+
   t0 = time.time()
   metrics_f = open(os.path.join(args.out, 'metrics.jsonl'), 'a')
 
@@ -273,6 +311,8 @@ def main():
       print(json.dumps(rec), flush=True)
       metrics_f.write(json.dumps(rec) + '\n')
       metrics_f.flush()
+    if update % 500 == 0:
+      save_resume()
     if update % 2000 == 0:
       torch.save({'vision': vision.state_dict(), 'grid': grid.state_dict(),
                   'policy': policy.state_dict()},
@@ -285,6 +325,7 @@ def main():
             os.path.join(args.out, f'gridcodes_{frames_done:09d}.npz'),
             g=gs, pos=ps, hd=hs)
 
+  save_resume()
   torch.save({'vision': vision.state_dict(), 'grid': grid.state_dict(),
               'policy': policy.state_dict()},
              os.path.join(args.out, 'ckpt_final.pt'))

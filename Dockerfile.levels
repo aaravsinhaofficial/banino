@@ -1,0 +1,7 @@
+# Adds custom DM-Lab levels to the RL images.
+# docker build -f Dockerfile.levels --build-arg BASE=dmlab-rl:latest -t dmlab-rl:latest .
+# docker build -f Dockerfile.levels --build-arg BASE=dmlab-rl:cpu -t dmlab-rl:cpu .
+ARG BASE=dmlab-rl:latest
+FROM ${BASE}
+COPY rl/levels/*.lua \
+  /usr/local/lib/python3.10/dist-packages/deepmind_lab/baselab/game_scripts/levels/
