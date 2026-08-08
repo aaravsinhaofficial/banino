@@ -15,7 +15,7 @@ upload() { tar czf /root/results.tar.gz -C banino/rl_runs __NAME__ && \
   curl -fsS -X PUT -T /root/results.tar.gz "__PUT_URL__"; }
 ( while true; do sleep 900; upload; done ) &
 docker run --rm --shm-size=8g -v /root/banino:/workspace -w /workspace \
-  dmlab-rl:latest python3 -m rl.train_rl \
+  dmlab-rl:cpu python3 -m rl.train_rl \
   --level contributed/dmlab30/explore_goal_locations_small \
   --out rl_runs/__NAME__ --agent __AGENT__ --frames __FRAMES__ --device cpu \
   > "$OUT/train.log" 2>&1
