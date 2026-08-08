@@ -50,6 +50,17 @@ def main():
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--seed', type=int, default=1)
+  ap.add_argument('--init_grid_from', default=None,
+                  help='Supervised GridNetwork checkpoint to warm-start the '
+                       'grid module from (velocity columns + recurrent '
+                       'weights + bottleneck + heads; visual-code input '
+                       'columns start at zero).')
+  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
+                  default='raw',
+                  help="'supervised' re-encodes env velocity as (ground "
+                       "speed, sin/cos of per-step heading change) — the "
+                       "convention the supervised checkpoint was trained "
+                       "on. Use together with --init_grid_from.")
   args = ap.parse_args()
 
   os.makedirs(args.out, exist_ok=True)
@@ -62,7 +73,22 @@ def main():
   n = args.n_envs
   venv = SubprocVecEnv(n, args.level, base_seed=args.seed * 1000,
                        fake=args.fake)
-  obs = venv.reset_all()
+
+  step_dt = args.action_repeat / 60.0  # seconds per decision step
+
+  def encode_vel(obs):
+    """Optionally re-encode velocity in place, BEFORE replay ingestion, so
+    acting, the replay-trained grid module, and offline decoding all see
+    one convention."""
+    if args.vel_encoding == 'supervised':
+      v = obs['vel']
+      dtheta = v[:, 2] * step_dt
+      obs['vel'] = np.stack([np.hypot(v[:, 0], v[:, 1]),
+                             np.sin(dtheta), np.cos(dtheta)],
+                            axis=1).astype(np.float32)
+    return obs
+
+  obs = encode_vel(venv.reset_all())
 
   pc_ens = targets_lib.PlaceCellEnsemble(
       pos_min=-args.arena_half_m, pos_max=args.arena_half_m, device=dev)
@@ -71,6 +97,21 @@ def main():
   vision = VisionCNN().to(dev)
   grid = GridModule().to(dev)
   policy = PolicyNet().to(dev)
+  if args.init_grid_from:
+    sd = torch.load(args.init_grid_from, map_location='cpu')
+    new = grid.state_dict()
+    w_ih = torch.zeros_like(new['cell.weight_ih'])
+    w_ih[:, :3] = sd['lstm.weight_ih_l0']   # velocity columns transfer;
+    new['cell.weight_ih'] = w_ih            # visual-code columns start at 0
+    new['cell.weight_hh'] = sd['lstm.weight_hh_l0']
+    new['cell.bias_ih'] = sd['lstm.bias_ih_l0']
+    new['cell.bias_hh'] = sd['lstm.bias_hh_l0']
+    new['bottleneck.weight'] = sd['bottleneck.weight']
+    for k in ('pc_logits.weight', 'pc_logits.bias',
+              'hd_logits.weight', 'hd_logits.bias'):
+      new[k] = sd[k]
+    grid.load_state_dict(new)
+    print(f'warm-started grid module from {args.init_grid_from}', flush=True)
   vis_opt = torch.optim.Adam(vision.parameters(), lr=1e-4)
   grid_opt = torch.optim.RMSprop(grid.parameters(), lr=1e-5, momentum=0.9,
                                  alpha=0.9, eps=1e-10)
@@ -139,6 +180,7 @@ def main():
       roll['actions'].append(a)
 
       obs, rewards, dones = venv.step(a.cpu().numpy())
+      obs = encode_vel(obs)
       frames_done += n * args.action_repeat  # env workers step with repeat 4
       r_t = torch.as_tensor(rewards, device=dev)
       d_t = torch.as_tensor(dones.astype(np.float32), device=dev)

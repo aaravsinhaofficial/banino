@@ -37,7 +37,21 @@ def main():
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--out', required=True)
+  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
+                  default='raw', help='Must match the training run.')
+  ap.add_argument('--action_repeat', type=int, default=4)
   args = ap.parse_args()
+
+  step_dt = args.action_repeat / 60.0
+
+  def encode_vel(obs):
+    if args.vel_encoding == 'supervised':
+      v = obs['vel']
+      dtheta = v[:, 2] * step_dt
+      obs['vel'] = np.stack([np.hypot(v[:, 0], v[:, 1]),
+                             np.sin(dtheta), np.cos(dtheta)],
+                            axis=1).astype(np.float32)
+    return obs
 
   dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
   vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
@@ -49,7 +63,7 @@ def main():
 
   n = args.n_envs
   venv = SubprocVecEnv(n, args.level, base_seed=7777, fake=args.fake)
-  obs = venv.reset_all()
+  obs = encode_vel(venv.reset_all())
   pol_state = policy.zero_state(n, dev)
   grid_state = grid.zero_state(n, dev)
   goal_code = torch.zeros(n, 512, device=dev)
@@ -89,6 +103,7 @@ def main():
 
       prev_pos = obs['pos'].copy()
       obs, rewards, dones = venv.step(a.cpu().numpy())
+      obs = encode_vel(obs)
       for i in range(n):
         if rewards[i] > 0:
           # The agent teleports on pickup, so the goal is where it WAS.
