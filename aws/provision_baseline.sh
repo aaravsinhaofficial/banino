@@ -18,9 +18,17 @@ IMAGE_URL=$($PY aws/presign.py get dmlab-rl.tar.gz)
 REPO_URL=$($PY aws/presign.py get banino-repo.tar.gz)
 PUT_URL=$($PY aws/presign.py put "rl_runs/$NAME/results.tar.gz")
 
-USER_DATA=$(sed -e "s|__IMAGE_URL__|$IMAGE_URL|" -e "s|__REPO_URL__|$REPO_URL|" \
-  -e "s|__PUT_URL__|$PUT_URL|" -e "s|__AGENT__|$AGENT|" -e "s|__NAME__|$NAME|" \
-  -e "s|__FRAMES__|$FRAMES|" aws/user_data.sh | base64 -w0)
+# Substitution via python: presigned URLs contain '&', which is a sed
+# replacement metacharacter and silently corrupts the URLs.
+USER_DATA=$(IMAGE_URL="$IMAGE_URL" REPO_URL="$REPO_URL" PUT_URL="$PUT_URL" \
+  AGENT="$AGENT" NAME="$NAME" FRAMES="$FRAMES" $PY - <<'EOF'
+import base64, os
+s = open('aws/user_data.sh').read()
+for k in ['IMAGE_URL', 'REPO_URL', 'PUT_URL', 'AGENT', 'NAME', 'FRAMES']:
+  s = s.replace('__%s__' % k, os.environ[k])
+print(base64.b64encode(s.encode()).decode())
+EOF
+)
 
 aws ec2 run-instances --profile $PROFILE --region $REGION \
   --image-id "$AMI" --instance-type $ITYPE \
