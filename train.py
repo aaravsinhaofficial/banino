@@ -221,12 +221,17 @@ def train():
           res = utils.concat_dict(res, mb_res)
 
         # Store at the end of validation
-        filename = 'rates_and_sac_latest_hd.pdf'
+        filename = 'rates_and_sac_epoch_%04d.pdf' % epoch
         grid_scores['btln_60'], grid_scores['btln_90'], grid_scores[
             'btln_60_separation'], grid_scores[
                 'btln_90_separation'] = utils.get_scores_and_plot(
                     latest_epoch_scorer, res['pos_xy'], res['bottleneck'],
                     FLAGS.saver_results_directory, filename)
+        tf.logging.info(
+            'Epoch %i, top grid score (60) %.4f, mean %.4f, units > 0.37: %i',
+            epoch, np.max(grid_scores['btln_60']),
+            np.mean(grid_scores['btln_60']),
+            np.sum(grid_scores['btln_60'] > 0.37))
 
 
 def main(unused_argv):
