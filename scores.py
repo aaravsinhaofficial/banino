@@ -24,7 +24,9 @@ from __future__ import print_function
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.ndimage
 import scipy.signal
+import scipy.stats
 
 
 def circle_mask(size, radius, in_val=1.0, out_val=0.0):

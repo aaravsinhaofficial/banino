@@ -22,7 +22,6 @@ from __future__ import print_function
 import matplotlib
 import numpy as np
 import tensorflow as tf
-import Tkinter  # pylint: disable=unused-import
 
 matplotlib.use('Agg')
 
@@ -212,8 +211,8 @@ def train():
                       np.mean(loss_acc), np.std(loss_acc))
       if epoch % FLAGS.saver_eval_time == 0:
         res = dict()
-        for _ in xrange(FLAGS.training_evaluation_minibatch_size //
-                        FLAGS.training_minibatch_size):
+        for _ in range(FLAGS.training_evaluation_minibatch_size //
+                       FLAGS.training_minibatch_size):
           mb_res = sess.run({
               'bottleneck': bottleneck,
               'lstm': lstm_output,

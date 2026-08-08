@@ -112,7 +112,7 @@ def concat_dict(acc, new_data):
     else:
       return np.asarray([kk])
 
-  for k, v in new_data.iteritems():
+  for k, v in new_data.items():
     if isinstance(v, dict):
       if k in acc:
         acc[k] = concat_dict(acc[k], v)
@@ -145,7 +145,7 @@ def get_scores_and_plot(scorer,
   # Get the rate-map for each unit
   s = [
       scorer.calculate_ratemap(xy[:, 0], xy[:, 1], act[:, i])
-      for i in xrange(n_units)
+      for i in range(n_units)
   ]
   # Get the scores
   score_60, score_90, max_60_mask, max_90_mask, sac = zip(
@@ -161,7 +161,7 @@ def get_scores_and_plot(scorer,
   cols = 16
   rows = int(np.ceil(n_units / cols))
   fig = plt.figure(figsize=(24, rows * 4))
-  for i in xrange(n_units):
+  for i in range(n_units):
     rf = plt.subplot(rows * 2, cols, i + 1)
     acr = plt.subplot(rows * 2, cols, n_units + i + 1)
     if i < n_units:
@@ -179,9 +179,9 @@ def get_scores_and_plot(scorer,
   # Save
   if not os.path.exists(directory):
     os.makedirs(directory)
-  with PdfPages(os.path.join(directory, filename), "w") as f:
+  with PdfPages(os.path.join(directory, filename)) as f:
     plt.savefig(f, format="pdf")
   plt.close(fig)
   return (np.asarray(score_60), np.asarray(score_90),
-          np.asarray(map(np.mean, max_60_mask)),
-          np.asarray(map(np.mean, max_90_mask)))
+          np.asarray([np.mean(m) for m in max_60_mask]),
+          np.asarray([np.mean(m) for m in max_90_mask]))
