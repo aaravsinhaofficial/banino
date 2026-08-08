@@ -42,11 +42,18 @@ implementation details are in the unavailable supplementary material.
 **Verdict:** the paper's core supervised claims reproduce — hexagonal
 grid-like units emerge robustly in both stacks, path integration reaches
 within ~3 cm of the published accuracy, and grid scales cluster with a
-ratio near the published ~1.5. Exact percentages differ (17.8% vs 25.2%
-grid) — unsurprising given the reconstructed dataset, the unpublished
-hyperparameter table (Supplementary Table 1), and the documented
-seed-sensitivity of grid emergence (README warning; Schaeffer et al. 2022
-found emergence knife-edge sensitive to unstated implementation choices).
+ratio near the published ~1.5.
+
+**Verified against the actual Supplementary Information** (fetched from
+Nature; now in this repo as Banino-2018-SI.pdf): our supervised
+configuration matches SI Table 1 on *every* parameter — motion model
+(T=15 s, L=2.2 m, d=0.03 m, Rayleigh 0.13 m/s, rotation N(0, 330°/s),
+dt=0.02 s, rho_RH=0.25, Delta_RH=90°), ensembles (N=256, sigma=0.01 m,
+M=12, kappa=20) and training (clip 1e-5, batch 10, length 100, lr 1e-5,
+momentum 0.9, L2 1e-5, 3x10^5 steps). The 17.8% vs 25.2% gap is therefore
+attributable to seed variance, the still-inferred ego_vel encoding
+convention, and analysis-procedure details — not to wrong hyperparameters
+(Schaeffer et al. 2022 document exactly this kind of sensitivity).
 
 ## RL experiments (paper Figs. 2–4) — PIPELINE REBUILT, REDUCED SCALE
 
@@ -109,6 +116,18 @@ requires ~30–60× more compute per run (≈$1–2k per experiment on spot
 CPU, or equivalent GPU-actor time). The unreleased components (custom
 sunburst/double-E mazes, lesion protocol, human-expert comparison) remain
 unimplemented.
+
+**Post-hoc correction from the retrieved SI** (Banino-2018-SI.pdf, Table 2):
+three of our guessed RL hyperparameters were wrong — entropy cost 1e-3 vs
+the paper's [6e-5, 1e-4]; agent grid-network lr 1e-5 (we reused the
+supervised recipe) vs the paper's **1e-3, no clip, L2 1e-4**; actor-critic
+BPTT 20 vs 100. All reduced-scale runs above used the mis-guessed values —
+in particular, the agent's grid network was training ~100× slower than the
+paper's, which compounds the under-training explanation for the missing
+grid emergence. rl/train_rl.py defaults now follow SI Table 2. SI also
+supplies the full-scale targets any future run should be compared against
+(goal maze, mean score over 100 episodes: grid 289 vs place-cell 238;
+goal-doors: 284.3 vs 90.5; human expert 346.5).
 
 ## Infrastructure delivered
 

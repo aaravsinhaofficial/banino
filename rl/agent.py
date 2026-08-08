@@ -91,7 +91,8 @@ def vision_update(vision, opt, replay, pc_ens, hd_ens, rng, device,
 
 
 def grid_update(grid, vision, opt, replay, pc_ens, hd_ens, rng, device,
-                batch=10, seqlen=100, mask_keep=0.05, vel_noise=0.01):
+                batch=10, seqlen=100, mask_keep=0.05, vel_noise=0.01,
+                l2=1e-4, clip=0.0):
   frames, vels, poss, hds = replay.sample_sequences(batch, seqlen, rng)
   if len(frames) < batch:
     return None
@@ -123,9 +124,10 @@ def grid_update(grid, vision, opt, replay, pc_ens, hd_ens, rng, device,
   opt.zero_grad(set_to_none=True)
   loss.backward()
   for p in grid.regularized_params():
-    p.grad.add_(p.data, alpha=1e-5)
-  for p in grid.parameters():
-    if p.grad is not None:
-      p.grad.clamp_(-1e-5, 1e-5)
+    p.grad.add_(p.data, alpha=l2)
+  if clip > 0:
+    for p in grid.parameters():
+      if p.grad is not None:
+        p.grad.clamp_(-clip, clip)
   opt.step()
   return loss.item()

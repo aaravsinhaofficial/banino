@@ -37,12 +37,21 @@ def main():
                   default='grid')
   ap.add_argument('--frames', type=int, default=20_000_000)
   ap.add_argument('--n_envs', type=int, default=32)
-  ap.add_argument('--rollout', type=int, default=20)
+  ap.add_argument('--rollout', type=int, default=100)
   ap.add_argument('--action_repeat', type=int, default=4)
+  # Defaults follow Supplementary Table 2 (SI, Banino-2018-SI.pdf): lr
+  # sampled in [1e-6, 2e-4], entropy in [6e-5, 1e-4], baseline cost ~0.5,
+  # discount 0.99, actor-critic BPTT 100 steps, grid-network lr 1e-3 with
+  # L2 1e-4 (NOT the supervised 1e-5/clip recipe).
   ap.add_argument('--gamma', type=float, default=0.99)
-  ap.add_argument('--lr', type=float, default=2e-4)
-  ap.add_argument('--entropy', type=float, default=1e-3)
+  ap.add_argument('--lr', type=float, default=1e-4)
+  ap.add_argument('--entropy', type=float, default=8e-5)
   ap.add_argument('--value_coef', type=float, default=0.5)
+  ap.add_argument('--grid_lr', type=float, default=1e-3)
+  ap.add_argument('--grid_l2', type=float, default=1e-4)
+  ap.add_argument('--grid_clip', type=float, default=0.0,
+                  help='Elementwise grad clip for the grid trainer; 0 = off '
+                       '(SI Table 2 lists no clip for the agent).')
   ap.add_argument('--arena_half_m', type=float, default=1.375)
   ap.add_argument('--replay_per_env', type=int, default=62_500)
   ap.add_argument('--vis_updates', type=int, default=8)
@@ -113,8 +122,8 @@ def main():
     grid.load_state_dict(new)
     print(f'warm-started grid module from {args.init_grid_from}', flush=True)
   vis_opt = torch.optim.Adam(vision.parameters(), lr=1e-4)
-  grid_opt = torch.optim.RMSprop(grid.parameters(), lr=1e-5, momentum=0.9,
-                                 alpha=0.9, eps=1e-10)
+  grid_opt = torch.optim.RMSprop(grid.parameters(), lr=args.grid_lr,
+                                 momentum=0.9, alpha=0.9, eps=1e-10)
   pol_opt = torch.optim.RMSprop(policy.parameters(), lr=args.lr, alpha=0.99,
                                 eps=0.1)
   replay = agent_lib.Replay(n, args.replay_per_env)
@@ -251,7 +260,8 @@ def main():
                                      rng, dev)
       for _ in range(args.grid_updates):
         gl = agent_lib.grid_update(grid, vision, grid_opt, replay, pc_ens,
-                                   hd_ens, rng, dev)
+                                   hd_ens, rng, dev, l2=args.grid_l2,
+                                   clip=args.grid_clip)
 
     update += 1
     if update % 50 == 0:
