@@ -8,7 +8,7 @@ systemctl start docker
 cd /root
 curl -fsSL "__IMAGE_URL__" | docker load
 curl -fsSL "__REPO_URL__" -o banino-repo.tar.gz
-mkdir -p banino && tar xzf banino-repo.tar.gz -C banino
+tar xzf banino-repo.tar.gz   # creates /root/banino
 OUT=banino/rl_runs/__NAME__
 mkdir -p "$OUT"
 upload() { tar czf /root/results.tar.gz -C banino/rl_runs __NAME__ && \

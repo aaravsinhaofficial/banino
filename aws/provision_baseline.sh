@@ -8,9 +8,12 @@ NAME=${1:?name}; AGENT=${2:?agent}; FRAMES=${3:-20000000}
 PROFILE=banino-repro; REGION=us-east-1
 PY=/home/ec2-user/banino/.venv/bin/python
 ITYPE=c7i.16xlarge          # 64 vCPU; spot ~= $1.1/h in us-east-1
-AMI=$(aws ssm get-parameter --profile $PROFILE --region $REGION \
-  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
-  --query 'Parameter.Value' --output text)
+# ssm:GetParameter is denied for this user; resolve the AMI via EC2 instead.
+AMI=$(aws ec2 describe-images --profile $PROFILE --region $REGION \
+  --owners amazon \
+  --filters 'Name=name,Values=al2023-ami-2023*-kernel-*-x86_64' \
+            'Name=state,Values=available' \
+  --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)
 IMAGE_URL=$($PY aws/presign.py get dmlab-rl.tar.gz)
 REPO_URL=$($PY aws/presign.py get banino-repo.tar.gz)
 PUT_URL=$($PY aws/presign.py put "rl_runs/$NAME/results.tar.gz")
