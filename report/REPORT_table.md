@@ -8,4 +8,6 @@
 | % HD units (0.47) | 8.7 | 12.4 ± 0.5 (n=6) |
 | Top grid score | — | 1.2 ± 0.1 (n=6) |
 | Grid scale ratio | ~1.5 | 1.7 ± 0.1 (n=6) |
-| RL arena_grid: % grid in grid module | 21.4 | 1.6 |
+| RL arena_grid: % grid in grid module | 21.4 | 1.2 |
+| RL goal_grid: % grid in grid module | 21.4 | 2.0 |
+| RL goal_grid: goal-dist decode R² (shuffled ctrl) | sig. | -0.43 (-0.17) |

@@ -56,27 +56,38 @@ achievable overnight on any budget. What was done instead: a faithful-
 in-architecture, synchronous A2C reimplementation trained at **1.5–3×10⁷
 frames** (1.5–3 % of the paper's scale) on the real DeepMind Lab tasks:
 
-- **Square arena** (`square_arena_10x10`, Fig. 2 analog, local GPU):
-  grid-module grid-ness tracked over training; at the midpoint the module
-  is pre-emergence (~1.6 % grid units, consistent with the supervised
-  timeline where grids needed ~5× more grid-trainer updates than this run
-  will reach). Final numbers in `rl_runs/arena_grid/grid_scores.json`.
+- **Square arena** (`square_arena_10x10`, Fig. 2 analog, local GPU, 2×10⁷
+  frames, complete): the grid module did **not** develop grid cells —
+  0.2–6 % of units above threshold across training (chance ≈ 3.5 %), no
+  upward trend, even as its path-integration loss steadily improved. This
+  matches the supervised timeline: the module received ~3×10⁴ trainer
+  updates, whereas grids first emerged in the supervised runs after
+  ~5×10⁴–3×10⁵ updates.
 - **Goal-driven maze** (`explore_goal_locations_small`, Fig. 3 analog,
-  local GPU, 3×10⁷ frames): reward climbing (≈5 average return at 10M
-  frames); goal-code capture and goal-vector decoding instrumented
-  (`rl/decode_goal.py`, held-out-episode ridge regression).
+  local GPU, 3×10⁷ frames, complete): final smoothed return ≈ 5–7,
+  finishing slightly above both baselines at frame parity but within
+  noise (fig_rl_returns.png). Goal-vector decoding from the policy LSTM
+  (held-out-episode ridge regression, `rl/decode_goal.py`): **negative** —
+  R² ≤ 0 for goal distance and direction (direction error 82° vs 90°
+  chance; shuffled-target control equivalent). The paper's decodable goal
+  vector has not formed at this scale. Grid module in the maze: ~2 %
+  grid-like (chance).
 - **Baselines on AWS spot** (place-cell agent, plain A3C; 1.5×10⁷ frames
   each, c7i.16xlarge, self-terminating, ~$3 total): final returns 6.0 and
-  5.8 — at this scale no significant separation between agents is expected
-  or observed; the paper's grid>place-cell>A3C ordering emerged over
-  hundreds of millions of frames.
+  5.8 — no significant separation between the three agents, as expected:
+  the paper's grid > place-cell > A3C ordering emerged over hundreds of
+  millions of frames.
 
-**Verdict:** the RL half is now *runnable and instrumented* end-to-end
-(environment, all three agents, grid-ness and goal-decoding analyses), but
-at overnight scale it demonstrates directional trends, not the paper's
-final RL results. Reaching those requires ~30–60× more compute per run.
-The unreleased components (custom sunburst/double-E mazes, lesion
-protocol, human-expert comparison) remain unimplemented.
+**Verdict:** the RL half is *runnable and instrumented* end-to-end
+(environment, all three agents, grid-ness and goal-decoding analyses), and
+the overnight-scale results are cleanly **negative in the directions the
+paper predicts they should be at 1.5–3 % of the published training
+budget**: no grid emergence in the agent's grid module yet, no decodable
+goal vector yet, no agent separation yet. Reaching the paper's RL results
+requires ~30–60× more compute per run (≈$1–2k per experiment on spot
+CPU, or equivalent GPU-actor time). The unreleased components (custom
+sunburst/double-E mazes, lesion protocol, human-expert comparison) remain
+unimplemented.
 
 ## Infrastructure delivered
 
