@@ -66,6 +66,11 @@ def main():
                   help='Resume from <out>/resume.pt if present (models, '
                        'optimizers, frame/update counters; replay restarts '
                        'warm).')
+  ap.add_argument('--reset_grid', action='store_true',
+                  help='One-shot recovery: on resume, keep policy/vision but '
+                       'reinitialize the grid module and its optimizer '
+                       '(collapsed grid trainer). The next resume.pt save '
+                       'persists the reset, so the flag is only needed once.')
   ap.add_argument('--arena_cells', type=int, default=11,
                   help='Maze frame size in cells (13 for square_arena_goal); '
                        'sets the position-centring offset in the env.')
@@ -164,11 +169,14 @@ def main():
   if args.resume and os.path.exists(resume_path):
     st = torch.load(resume_path, map_location=dev)
     vision.load_state_dict(st['vision'])
-    grid.load_state_dict(st['grid'])
     policy.load_state_dict(st['policy'])
     vis_opt.load_state_dict(st['vis_opt'])
-    grid_opt.load_state_dict(st['grid_opt'])
     pol_opt.load_state_dict(st['pol_opt'])
+    if args.reset_grid:
+      print('reset_grid: grid module + optimizer reinitialized', flush=True)
+    else:
+      grid.load_state_dict(st['grid'])
+      grid_opt.load_state_dict(st['grid_opt'])
     frames_done = st['frames_done']
     update = st['update']
     next_episode = st['next_episode']
