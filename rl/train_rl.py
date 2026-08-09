@@ -49,9 +49,12 @@ def main():
   ap.add_argument('--value_coef', type=float, default=0.5)
   ap.add_argument('--grid_lr', type=float, default=1e-3)
   ap.add_argument('--grid_l2', type=float, default=1e-4)
-  ap.add_argument('--grid_clip', type=float, default=0.0,
-                  help='Elementwise grad clip for the grid trainer; 0 = off '
-                       '(SI Table 2 lists no clip for the agent).')
+  ap.add_argument('--grid_clip', type=float, default=1e-3,
+                  help='Elementwise grad clip for the grid trainer; 0 = off. '
+                       'SI Table 2 lists no clip, but the unclipped 1e-3 '
+                       'recipe destabilised in 3 of 4 grid trainers around '
+                       'update ~14k; this default keeps the supervised '
+                       "recipe's clip/lr ratio at the agent's lr.")
   ap.add_argument('--arena_half_m', type=float, default=1.375)
   ap.add_argument('--replay_per_env', type=int, default=62_500)
   ap.add_argument('--vis_updates', type=int, default=8)
