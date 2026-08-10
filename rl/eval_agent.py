@@ -1,0 +1,125 @@
+"""Frozen-policy evaluation: mean score over N episodes (SI benchmark
+protocol — the paper reports 'average score over 100 episodes').
+
+No learning, no exploration changes: the stochastic policy acts exactly as
+in training (grid-module dropout stays active, as during acting).
+
+Usage (inside dmlab-rl container):
+  python3 -m rl.eval_agent --ckpt rl_runs/fs_goal_grid/ckpt_final.pt \
+      --level contributed/dmlab30/explore_goal_locations_small \
+      --agent grid --episodes 100 --out rl_runs/fs_goal_grid
+"""
+
+import argparse
+import json
+import os
+import sys
+
+import numpy as np
+import torch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from rl.nets import GridModule, PolicyNet, VisionCNN  # noqa: E402
+from rl.vec_env import SubprocVecEnv                  # noqa: E402
+
+
+def main():
+  ap = argparse.ArgumentParser()
+  ap.add_argument('--ckpt', required=True)
+  ap.add_argument('--level', required=True)
+  ap.add_argument('--agent', choices=['grid', 'placecell', 'a3c'],
+                  required=True)
+  ap.add_argument('--episodes', type=int, default=100)
+  ap.add_argument('--n_envs', type=int, default=8)
+  ap.add_argument('--arena_cells', type=int, default=11)
+  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
+                  default='raw')
+  ap.add_argument('--action_repeat', type=int, default=4)
+  ap.add_argument('--device', default='cuda:0')
+  ap.add_argument('--fake', action='store_true')
+  ap.add_argument('--out', required=True)
+  args = ap.parse_args()
+
+  dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
+      PolicyNet().to(dev)
+  ck = torch.load(args.ckpt, map_location=dev)
+  vision.load_state_dict(ck['vision'])
+  grid.load_state_dict(ck['grid'])
+  policy.load_state_dict(ck['policy'])
+  vision.eval()
+  policy.eval()   # no dropout layers, but freeze norm-free semantics anyway
+  grid.train()    # dropout active, as during acting
+
+  step_dt = args.action_repeat / 60.0
+
+  def encode_vel(obs):
+    if args.vel_encoding == 'supervised':
+      v = obs['vel']
+      dtheta = v[:, 2] * step_dt
+      obs['vel'] = np.stack([np.hypot(v[:, 0], v[:, 1]),
+                             np.sin(dtheta), np.cos(dtheta)],
+                            axis=1).astype(np.float32)
+    return obs
+
+  n = args.n_envs
+  venv = SubprocVecEnv(n, args.level, base_seed=424242, fake=args.fake,
+                       env_kwargs=dict(arena_cells=args.arena_cells,
+                                       cell_m=0.25) if not args.fake else None)
+  obs = encode_vel(venv.reset_all())
+  pol_state = policy.zero_state(n, dev)
+  grid_state = grid.zero_state(n, dev)
+  goal_code = torch.zeros(n, 512, device=dev)
+  prev_action = torch.zeros(n, dtype=torch.long, device=dev)
+  prev_reward = torch.zeros(n, device=dev)
+  ep_return = np.zeros(n)
+  scores = []
+
+  with torch.no_grad():
+    while len(scores) < args.episodes:
+      rgb = torch.as_tensor(obs['rgb'], device=dev).permute(0, 3, 1, 2).float() / 255.
+      vel = torch.as_tensor(obs['vel'], device=dev)
+      pc_l, hd_l = vision(rgb)
+      vis_pc, vis_hd = torch.softmax(pc_l, -1), torch.softmax(hd_l, -1)
+      mask = (torch.rand(n, 1, device=dev) < 0.05).float()
+      g, grid_state = grid.step(vel, vis_pc, vis_hd, mask, grid_state)
+      if args.agent == 'grid':
+        g_in, goal_in = g, goal_code
+      elif args.agent == 'placecell':
+        g_in = torch.cat([vis_pc, vis_hd,
+                          torch.zeros(n, 512 - 268, device=dev)], -1)
+        goal_in = torch.zeros_like(goal_code)
+      else:
+        g_in = torch.zeros_like(g)
+        goal_in = torch.zeros_like(goal_code)
+      pi, _, pol_state = policy.step(rgb, g_in, goal_in, prev_action,
+                                     prev_reward, pol_state)
+      a = torch.distributions.Categorical(logits=pi).sample()
+      obs, rewards, dones = venv.step(a.cpu().numpy())
+      obs = encode_vel(obs)
+      r_t = torch.as_tensor(rewards, device=dev)
+      hit = (r_t > 0).float().unsqueeze(1)
+      goal_code = hit * g.detach() + (1 - hit) * goal_code
+      ep_return += rewards
+      for i in range(n):
+        if dones[i]:
+          scores.append(float(ep_return[i]))
+          ep_return[i] = 0.0
+          goal_code[i].zero_()
+          grid_state[0][i].zero_(); grid_state[1][i].zero_()
+          pol_state[0][i].zero_(); pol_state[1][i].zero_()
+      prev_action = a
+      prev_reward = r_t
+
+  venv.close()
+  scores = np.array(scores[:args.episodes])
+  res = dict(mean_score=float(scores.mean()), std=float(scores.std()),
+             sem=float(scores.std() / np.sqrt(len(scores))),
+             n_episodes=int(len(scores)), ckpt=args.ckpt)
+  print(json.dumps(res))
+  with open(os.path.join(args.out, 'eval_scores.json'), 'w') as f:
+    json.dump(res, f, indent=1)
+
+
+if __name__ == '__main__':
+  main()

@@ -117,6 +117,49 @@ CPU, or equivalent GPU-actor time). The unreleased components (custom
 sunburst/double-E mazes, lesion protocol, human-expert comparison) remain
 unimplemented.
 
+## FULL-SCALE RL REPLICATION (10⁹ frames per agent) — COMPLETED
+
+Eight cells trained to the paper's full 10⁹-frame budget with SI Table 2
+hyperparameters (grid + place-cell + A3C on the goal maze and goal-doors;
+grid + place-cell on a custom open square arena with the same task
+semantics). Two mid-run incidents, both documented in git history: the
+SI's unclipped grid-network recipe (lr 1e-3) destabilised in 4 of 4 grid
+trainers and required a clip (at the paper's own supervised clip/lr
+ratio) plus one-shot grid-module resets. Frozen-policy evaluation, mean
+score over 100 episodes (the SI's protocol):
+
+| Task | grid | place-cell | A3C | Paper (grid / place) |
+|---|---|---|---|---|
+| Goal maze | 7.6 ± 1.0 | 7.1 ± 1.2 | 6.1 ± 1.0 | 289 / 238 |
+| Goal-doors | 5.1 ± 0.8 | 5.3 ± 0.8 | 3.9 ± 0.7 | 284.3 / 90.5 |
+| Square arena | 7.8 ± 1.4 | 10.5 ± 1.5 | — | — |
+
+**What reproduced at full scale:**
+- **Grid cells emerge inside the RL agent** (Fig 2g analog): 14.5 % of the
+  arena grid agent's module units score above 0.37 with a top grid score
+  of 1.32 (paper: 21.4 %); the place-cell control's independently trained
+  module reaches 16.4 %. At reduced scale this was chance-level.
+- **A metric goal vector forms in the policy LSTM** (Fig 2j analog):
+  held-out-episode ridge decoding from the arena grid agent recovers goal
+  distance at R² = 0.55 (shuffled control −0.15; MAE 0.50 m) and goal
+  direction to 24.4° mean error (chance 90°). The maze agent carries the
+  direction signal (36.9°) but not distance.
+- A3C is reliably the worst agent on both maze tasks, and the agent
+  ordering on the mazes is direction-consistent with the paper (grid ≥
+  place-cell > A3C), within error bars for grid-vs-place.
+
+**What did not reproduce:** absolute navigation performance and clear
+agent separation. All maze agents plateau at scores ~40–55× below the
+published benchmarks and overlap for most of training; in the arena the
+place-cell agent ends above the grid agent. The published scores imply
+~29 goal reaches per 90 s episode versus our ~0.5–1 — a qualitative
+behavioural gap, not a tuning-size one. Candidate causes, in order of
+suspicion: synchronous A2C versus their async A3C with shared-statistics
+RMSProp; our single hyperparameter draw versus their best-30-of-60
+replica selection; unstated details of episode/reward structure. The
+representational claims survive this gap; the performance claims remain
+unverified by this replication.
+
 **Post-hoc correction from the retrieved SI** (Banino-2018-SI.pdf, Table 2):
 three of our guessed RL hyperparameters were wrong — entropy cost 1e-3 vs
 the paper's [6e-5, 1e-4]; agent grid-network lr 1e-5 (we reused the

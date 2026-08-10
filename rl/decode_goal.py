@@ -40,6 +40,7 @@ def main():
   ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
                   default='raw', help='Must match the training run.')
   ap.add_argument('--action_repeat', type=int, default=4)
+  ap.add_argument('--arena_cells', type=int, default=11)
   args = ap.parse_args()
 
   step_dt = args.action_repeat / 60.0
@@ -62,7 +63,9 @@ def main():
   policy.load_state_dict(ck['policy'])
 
   n = args.n_envs
-  venv = SubprocVecEnv(n, args.level, base_seed=7777, fake=args.fake)
+  venv = SubprocVecEnv(n, args.level, base_seed=7777, fake=args.fake,
+                       env_kwargs=dict(arena_cells=args.arena_cells,
+                                       cell_m=0.25) if not args.fake else None)
   obs = encode_vel(venv.reset_all())
   pol_state = policy.zero_state(n, dev)
   grid_state = grid.zero_state(n, dev)
