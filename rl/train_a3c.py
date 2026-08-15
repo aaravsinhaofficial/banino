@@ -189,6 +189,19 @@ def actor_proc(rank, cfg, shared, ctrl):
 
     vision_l = VisionCNN()
     grid_l = GridModule(n_vel=cfg['n_vel'])
+    # The paper's PLACE CELL AGENT is a ground-truth control: "the place cell
+    # agent used ground truth information: specifically, the ground-truth
+    # place, c_t, and head-direction, h_t, cell activations" (Methods), with
+    # the ground-truth goal codes c*, h* from the last goal visit. Build the
+    # same ensembles the supervised targets use — identical centres, since
+    # they are drawn from a fixed seed.
+    pc_ens_gt = hd_ens_gt = None
+    if cfg['agent'] == 'placecell':
+      from modern import targets as targets_lib
+      pc_ens_gt = targets_lib.PlaceCellEnsemble(
+          stdev=cfg['pc_scale'], pos_min=-cfg['arena_half_m'],
+          pos_max=cfg['arena_half_m'], device='cpu')
+      hd_ens_gt = targets_lib.HeadDirectionCellEnsemble(device='cpu')
     policy_l = PolicyNet(n_actions=cfg['n_actions'])
     # Dropout on the grid code while acting is this repo's old behaviour and
     # is not in the paper; default to eval() so the policy sees the expected
@@ -255,6 +268,17 @@ def actor_proc(rank, cfg, shared, ctrl):
         if cfg['agent'] == 'grid':
           g_in, goal_in = g, goal_code
         elif cfg['agent'] == 'placecell':
+          # Ground-truth place + head-direction codes (paper's primary control).
+          pos_t = torch.as_tensor(obs['pos']).unsqueeze(0)
+          hd_t = torch.as_tensor(obs['hd']).reshape(1, 1)
+          c_t = pc_ens_gt.get_targets(pos_t)
+          h_t = hd_ens_gt.get_targets(hd_t)
+          g_in = torch.cat([c_t, h_t, torch.zeros(1, 512 - 268)], -1)
+          goal_in = goal_code
+        elif cfg['agent'] == 'placecell_vis':
+          # The vision module's PREDICTED codes. This repo's earlier control;
+          # it is neither of the paper's two place-cell agents (theirs are
+          # ground truth, or the grid network's decoder outputs y_t, z_t).
           g_in = torch.cat([vis_pc, vis_hd, torch.zeros(1, 512 - 268)], -1)
           goal_in = goal_code
         else:  # A3C baseline: no grid or place-cell input at all (SI 3b)
@@ -458,8 +482,12 @@ def main():
   ap.add_argument('--level',
                   default='contributed/dmlab30/explore_goal_locations_small')
   ap.add_argument('--out', required=True)
-  ap.add_argument('--agent', choices=['grid', 'placecell', 'a3c'],
-                  default='grid')
+  ap.add_argument('--agent',
+                  choices=['grid', 'placecell', 'placecell_vis', 'a3c'],
+                  default='grid',
+                  help="'placecell' is the paper's ground-truth place-cell "
+                       "control; 'placecell_vis' is this repo's earlier "
+                       'variant fed the vision module\'s predictions.')
   ap.add_argument('--frames', type=int, default=1_000_000_000)
   ap.add_argument('--workers', type=int, default=32,
                   help='Async actor processes (paper: 32).')

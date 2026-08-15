@@ -27,8 +27,11 @@ def main():
   ap = argparse.ArgumentParser()
   ap.add_argument('--ckpt', required=True)
   ap.add_argument('--level', required=True)
-  ap.add_argument('--agent', choices=['grid', 'placecell', 'a3c'],
+  ap.add_argument('--agent',
+                  choices=['grid', 'placecell', 'placecell_vis', 'a3c'],
                   required=True)
+  ap.add_argument('--pc_scale', type=float, default=0.1)
+  ap.add_argument('--arena_half_m', type=float, default=1.375)
   ap.add_argument('--episodes', type=int, default=100)
   ap.add_argument('--n_envs', type=int, default=8)
   ap.add_argument('--arena_cells', type=int, default=11)
@@ -95,6 +98,15 @@ def main():
                             axis=1).astype(np.float32)
     return obs
 
+  pc_ens_gt = hd_ens_gt = None
+  if args.agent == 'placecell':
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from modern import targets as targets_lib
+    pc_ens_gt = targets_lib.PlaceCellEnsemble(
+        stdev=args.pc_scale, pos_min=-args.arena_half_m,
+        pos_max=args.arena_half_m, device=dev)
+    hd_ens_gt = targets_lib.HeadDirectionCellEnsemble(device=dev)
+
   n = args.n_envs
   venv = SubprocVecEnv(n, args.level, base_seed=424242, fake=args.fake,
                        env_kwargs=dict(arena_cells=args.arena_cells,
@@ -120,6 +132,15 @@ def main():
         g_in = g
         goal_in = torch.zeros_like(goal_code) if args.lesion_goal else goal_code
       elif args.agent == 'placecell':
+        # Ground-truth codes, as in training (paper's primary control).
+        pos_t = torch.as_tensor(obs['pos'], device=dev)
+        hd_t = torch.as_tensor(obs['hd'], device=dev).unsqueeze(-1)
+        g_in = torch.cat([pc_ens_gt.get_targets(pos_t),
+                          hd_ens_gt.get_targets(hd_t),
+                          torch.zeros(n, 512 - 268, device=dev)], -1)
+        goal_in = (torch.zeros_like(goal_code) if args.lesion_goal
+                   else goal_code)
+      elif args.agent == 'placecell_vis':
         g_in = torch.cat([vis_pc, vis_hd,
                           torch.zeros(n, 512 - 268, device=dev)], -1)
         goal_in = (torch.zeros_like(goal_code) if args.lesion_goal
