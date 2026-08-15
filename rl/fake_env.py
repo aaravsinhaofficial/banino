@@ -27,6 +27,8 @@ _TARGETS = {
     6: (1.0, 0.0, 1.0),    # forward_turn_left
     7: (1.0, 0.0, -1.0),   # forward_turn_right
 }
+# Follow rl.env when BANINO_ACTION_SET truncates the action set.
+_TARGETS = {k: v for k, v in _TARGETS.items() if k < NUM_ACTIONS}
 assert len(_TARGETS) == NUM_ACTIONS == len(ACTIONS)
 
 

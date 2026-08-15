@@ -17,6 +17,8 @@ ContextGame::SetPlayerState), so obs['vel'][2] is instead derived from
 consecutive DEBUG.POS.ROT yaw deltas over the step's frames; this
 matches the commanded look rate exactly (20 px/frame -> 2.21 rad/s).
 """
+import os
+
 import numpy as np
 
 # DM-Lab discrete action order, as returned by Lab.action_spec():
@@ -51,6 +53,14 @@ ACTIONS = [
     ('forward_turn_left', _act(look_lr=-_ROT_PIX, move=1)),
     ('forward_turn_right', _act(look_lr=_ROT_PIX, move=1)),
 ]
+
+# The paper's actor is "a linear layer with six units" (Methods, agent
+# architecture), i.e. six discrete actions; it does not say which six.
+# BANINO_ACTION_SET=6 truncates to the first six — the set this repo used
+# before 2026-08-15 — so results from the two action sets can be compared
+# against matched baselines.
+if os.environ.get('BANINO_ACTION_SET') == '6':
+  ACTIONS = ACTIONS[:6]
 NUM_ACTIONS = len(ACTIONS)
 
 # RGB observation fallbacks: (name, planar layout?).

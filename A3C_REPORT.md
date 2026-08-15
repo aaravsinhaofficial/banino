@@ -13,16 +13,33 @@ invalidates the performance half of the previous full-scale run:
 > untrained-network chance line.**
 
 Measured with an untrained (random-init) network through the *same*
-100-episode protocol used for every trained cell:
+100-episode protocol used for every trained cell. **The baseline depends on
+the action set**, so it must be matched to the run being judged:
 
-| task | untrained network | previously reported "results" |
+| action set | untrained network | which runs it applies to |
 |---|---|---|
-| `explore_goal_locations_small` | **7.2 ± 1.07** | grid 7.6 ± 1.0, place-cell 7.1 ± 1.2, A3C 6.1 ± 1.0 |
+| 6 actions | **3.9 ± 0.71** | everything before 2026-08-15 |
+| 8 actions | **7.2 ± 1.07** | this run's cells |
 
-All three previously reported scores are within noise of an untrained
-network, so the "grid ≥ place-cell > A3C ordering is direction-consistent
-with the paper" claim in REPORT.md was noise around a policy that had never
-learned anything.
+Re-scoring the previous full-scale run against its *matched* 6-action
+baseline:
+
+| previous run | reported | vs chance 3.9 ± 0.71 |
+|---|---|---|
+| grid | 7.6 ± 1.0 | +3.7 (3.0σ) |
+| place-cell | 7.1 ± 1.2 | +3.2 (2.3σ) |
+| A3C | 6.1 ± 1.0 | +2.2 (1.8σ) |
+
+So those agents were **marginally above chance, not exactly at it** — a
+correction to the stronger claim made earlier in this session, which
+compared 6-action results against an 8-action baseline. This is consistent
+with the reduction bug: gradients ~100× too small meant 10⁹ frames bought
+roughly what 10⁷ properly-scaled frames would, i.e. a little learning.
+
+What does *not* survive is the ordering. Grid minus A3C is 1.5 ± 1.4, about
+1σ, so "grid ≥ place-cell > A3C, direction-consistent with the paper" was
+reading a ranking out of noise. And all three remain ~40× below the paper's
+published 289.
 
 ## Root cause: the rollout loss averaged where A3C accumulates
 
