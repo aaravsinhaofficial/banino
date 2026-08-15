@@ -46,6 +46,35 @@ for c in "${CELLS[@]}"; do
       --out "rl_runs/$c" > "rl_runs/$c/eval_local.log" 2>&1 \
       && echo "  local eval done" || echo "  local eval FAILED"
   fi
+
+  # Peak-checkpoint eval. Several cells (notably the arena grid agent) peak
+  # mid-training and then regress, so the final checkpoint understates what
+  # the architecture reached. Evaluate the hourly checkpoint nearest the
+  # best training return as well, and report both.
+  peak=$(.venv/bin/python - "$c" <<'PY'
+import glob, json, os, re, sys
+c = sys.argv[1]
+rows = [json.loads(l) for l in open(f'rl_runs/{c}/metrics.jsonl') if l.strip()]
+rows = [r for r in rows if r.get('avg_return_50') is not None]
+if not rows:
+    sys.exit()
+best = max(rows, key=lambda r: r['avg_return_50'])
+cands = []
+for p in glob.glob(f'rl_runs/{c}/ckpt_*.pt'):
+    m = re.search(r'ckpt_(\d+)\.pt', os.path.basename(p))
+    if m:
+        cands.append((abs(int(m.group(1)) - best['frames']), p))
+if cands:
+    print(min(cands)[1])
+PY
+)
+  if [ -n "$peak" ] && [ "$peak" != "$ckpt" ]; then
+    echo "  peak checkpoint: $peak"
+    $DOCKER python3 -m rl.eval_agent --ckpt "$peak" --level "$LEVEL" \
+      --agent "$agent" --episodes 100 --n_envs 24 --device cpu \
+      --out "rl_runs/$c/peak" > "rl_runs/$c/eval_peak.log" 2>&1 \
+      && echo "  peak eval done" || echo "  peak eval FAILED"
+  fi
 done
 
 .venv/bin/python -m rl.aggregate_a3c --rl rl_runs --prefix a3c_goal \

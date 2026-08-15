@@ -132,10 +132,27 @@ pinned at exactly the maximum for the whole of the previous 10⁹-frame run.
 - **Goal maze (paper Fig. 3).** All four cells climb out of the untrained
   band at ~8–9M frames; 12–18 by 25M against chance 7.2. No agent separation
   yet (the paper's central claim), and it is far too early to expect one.
-- **Square arena (paper Fig. 2).** 4.4–5.0 against chance 3.2 ± 0.6 — above
-  baseline but only ~2σ, and moving slowly; these cells run 32 workers (the
-  paper's thread count) so they accumulate updates at half the maze cells'
-  rate.
+- **Square arena (paper Fig. 2) — an early grid advantage that does not
+  hold.** The grid agent learns much faster than the place-cell control at
+  first (peak 37.8 at 23M frames versus ~17 for place-cell, better than 2×),
+  which looked like a clean reproduction of Fig. 2f. It is not. The grid
+  agent then destabilises — 33 at 51M, 27 at 63M, 19.8 at 74M — while
+  place-cell climbs monotonically to the same 19.8, and the two finish at
+  parity. Policy entropy tracks it: the grid agent's *rises* from 1.06 back
+  to 1.48 over the decline, i.e. it partially unlearns.
+
+  A second independent seed, launched specifically to test the separation,
+  does not reproduce it either: at matched ~20M frames seed 1 gave grid 23.5
+  vs place-cell 16.9, while seed 2 gives 18.7 vs 17.8.
+
+  A plausible mechanism is visible in the logs: the grid module is retrained
+  from replay throughout training and its loss keeps oscillating (4.4–5.9),
+  so the policy's input representation shifts underneath a policy that has
+  already fitted to it. The place-cell agent's visual-code input drifts less.
+
+  This is exactly the failure mode that produced the previous report's false
+  conclusion, caught this time only because a replicate seed was run. Any
+  claim from a single seed here would have been wrong.
 
 ![learning curves](report/fig_a3c.png)
 
