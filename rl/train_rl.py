@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modern import targets as targets_lib          # noqa: E402
 from rl import agent as agent_lib                  # noqa: E402
 from rl.nets import GridModule, PolicyNet, VisionCNN  # noqa: E402
+from rl.pi_rnn import BOX_HALF, PIRNN              # noqa: E402
 from rl.vec_env import SubprocVecEnv               # noqa: E402
 
 
@@ -33,7 +34,7 @@ def main():
   ap.add_argument('--level',
                   default='contributed/dmlab30/explore_goal_locations_small')
   ap.add_argument('--out', required=True)
-  ap.add_argument('--agent', choices=['grid', 'placecell', 'a3c'],
+  ap.add_argument('--agent', choices=['grid', 'placecell', 'a3c', 'pirnn'],
                   default='grid')
   ap.add_argument('--frames', type=int, default=20_000_000)
   ap.add_argument('--n_envs', type=int, default=32)
@@ -88,6 +89,19 @@ def main():
                        "speed, sin/cos of per-step heading change) — the "
                        "convention the supervised checkpoint was trained "
                        "on. Use together with --init_grid_from.")
+  ap.add_argument('--pirnn_ckpt', default=None,
+                  help='(--agent pirnn) Pretrained path-integration RNN '
+                       'state_dict from predictive-grid-cell-analysis; its '
+                       'frozen hidden state replaces the grid code.')
+  ap.add_argument('--pirnn_env_half', type=float, default=None,
+                  help='(--agent pirnn) Env half-extent (m) mapped onto the '
+                       "RNN's native [-1.1, 1.1] m box; default arena_half_m.")
+  ap.add_argument('--pirnn_reanchor', type=float, default=0.05,
+                  help='(--agent pirnn) Per-step probability of re-anchoring '
+                       'the RNN state from the place-cell code at the true '
+                       "position — the pure integrator drifts over the "
+                       "paper-agent's 1800-step episodes, and the paper's "
+                       'grid LSTM had the same 5%% visual correction.')
   args = ap.parse_args()
 
   os.makedirs(args.out, exist_ok=True)
@@ -124,9 +138,19 @@ def main():
       pos_min=-args.arena_half_m, pos_max=args.arena_half_m, device=dev)
   hd_ens = targets_lib.HeadDirectionCellEnsemble(device=dev)
 
+  pirnn = None
+  n_grid = 512
+  if args.agent == 'pirnn':
+    assert args.pirnn_ckpt, '--agent pirnn requires --pirnn_ckpt'
+    pirnn = PIRNN(args.pirnn_ckpt, device=dev)
+    n_grid = pirnn.Ng
+    env_half = args.pirnn_env_half or args.arena_half_m
+    pirnn_scale = BOX_HALF / env_half
+    print(f'pirnn: Ng={n_grid} from {args.pirnn_ckpt}, '
+          f'coord scale {pirnn_scale:.4f} (env half {env_half} m)', flush=True)
   vision = VisionCNN().to(dev)
   grid = GridModule().to(dev)
-  policy = PolicyNet().to(dev)
+  policy = PolicyNet(n_grid=n_grid).to(dev)
   if args.init_grid_from:
     sd = torch.load(args.init_grid_from, map_location='cpu')
     new = grid.state_dict()
@@ -147,11 +171,18 @@ def main():
                                  momentum=0.9, alpha=0.9, eps=1e-10)
   pol_opt = torch.optim.RMSprop(policy.parameters(), lr=args.lr, alpha=0.99,
                                 eps=0.1)
-  replay = agent_lib.Replay(n, args.replay_per_env)
+  # The pirnn agent trains no vision/grid module, so skip the replay's
+  # multi-GB frame preallocation.
+  replay = agent_lib.Replay(n, args.replay_per_env
+                            if args.agent != 'pirnn' else 1)
 
   pol_state = policy.zero_state(n, dev)
   grid_state = grid.zero_state(n, dev)
-  goal_code = torch.zeros(n, 512, device=dev)
+  goal_code = torch.zeros(n, n_grid, device=dev)
+  if args.agent == 'pirnn':
+    h_pi = torch.zeros(n, n_grid, device=dev)
+    pirnn_prev_pos = torch.zeros(n, 2, device=dev)
+    pirnn_reinit = torch.ones(n, dtype=torch.bool, device=dev)
   prev_action = torch.zeros(n, dtype=torch.long, device=dev)
   prev_reward = torch.zeros(n, device=dev)
   episode_ids = np.arange(n, dtype=np.int64)
@@ -206,26 +237,43 @@ def main():
       rgb = to_rgb(obs)
       vel = torch.as_tensor(obs['vel'], device=dev)
       with torch.no_grad():
-        pc_l, hd_l = vision(rgb)
-        vis_pc = torch.softmax(pc_l, -1)
-        vis_hd = torch.softmax(hd_l, -1)
-        mask = (torch.rand(n, 1, device=dev) < 0.05).float()
-        g, grid_state = grid.step(vel, vis_pc, vis_hd, mask, grid_state)
-        if args.agent == 'grid':
+        if args.agent == 'pirnn':
+          # Frozen path-integration RNN: input is the allocentric per-step
+          # displacement in RNN-box coordinates; state re-anchored from the
+          # place-cell code at spawns/teleports (flagged last step).
+          pos_t = torch.as_tensor(obs['pos'], device=dev) * pirnn_scale
+          reanchor = torch.rand(n, device=dev) < args.pirnn_reanchor
+          h_pi, _ = pirnn.advance(h_pi, pos_t - pirnn_prev_pos,
+                                  pirnn_reinit | reanchor, pos_t)
+          pirnn_prev_pos = pos_t
+          pirnn_reinit = torch.zeros_like(pirnn_reinit)
+          g = pirnn.g_for_policy(h_pi)
           g_in, goal_in = g, goal_code
-        elif args.agent == 'placecell':
-          g_in = torch.cat([vis_pc, vis_hd,
-                            torch.zeros(n, 512 - 268, device=dev)], -1)
-          goal_in = torch.zeros_like(goal_code)
         else:
-          g_in = torch.zeros_like(g)
-          goal_in = torch.zeros_like(goal_code)
+          pc_l, hd_l = vision(rgb)
+          vis_pc = torch.softmax(pc_l, -1)
+          vis_hd = torch.softmax(hd_l, -1)
+          mask = (torch.rand(n, 1, device=dev) < 0.05).float()
+          g, grid_state = grid.step(vel, vis_pc, vis_hd, mask, grid_state)
+          if args.agent == 'grid':
+            g_in, goal_in = g, goal_code
+          elif args.agent == 'placecell':
+            g_in = torch.cat([vis_pc, vis_hd,
+                              torch.zeros(n, 512 - 268, device=dev)], -1)
+            goal_in = torch.zeros_like(goal_code)
+          else:
+            g_in = torch.zeros_like(g)
+            goal_in = torch.zeros_like(goal_code)
         pi, v, pol_state = policy.step(rgb, g_in, goal_in, prev_action,
                                        prev_reward, pol_state)
         a = torch.distributions.Categorical(logits=pi).sample()
 
-      replay.add(obs, episode_ids)
-      gp_buf.append((g.detach().cpu().numpy().astype(np.float16),
+      if args.agent != 'pirnn':
+        replay.add(obs, episode_ids)
+      # For pirnn only the classified first 256 units are dumped (full Ng
+      # would be ~400MB per dump).
+      g_dump = g[:, :256] if args.agent == 'pirnn' else g
+      gp_buf.append((g_dump.detach().cpu().numpy().astype(np.float16),
                      obs['pos'].copy(), obs['hd'].copy()))
       if len(gp_buf) > 2000:
         gp_buf.pop(0)
@@ -248,6 +296,10 @@ def main():
       # Goal-code capture: store the grid code at reward pickup.
       hit = (r_t > 0).float().unsqueeze(1)
       goal_code = hit * g.detach() + (1 - hit) * goal_code
+      if args.agent == 'pirnn':
+        # Reward respawns the agent (teleport) and done auto-resets the
+        # episode: re-anchor the RNN state from place cells next step.
+        pirnn_reinit = (r_t > 0) | (d_t > 0)
 
       ep_return += rewards
       for i, d in enumerate(dones):
@@ -303,7 +355,7 @@ def main():
 
     # ---------------- supervised trainers ----------------
     vl = gl = None
-    if replay.count * n > 50_000:
+    if args.agent != 'pirnn' and replay.count * n > 50_000:
       for _ in range(args.vis_updates):
         vl = agent_lib.vision_update(vision, vis_opt, replay, pc_ens, hd_ens,
                                      rng, dev)
@@ -319,6 +371,11 @@ def main():
       rec = dict(update=update, frames=frames_done, fps=round(fps),
                  avg_return_50=round(avg_ret, 2), ent=round(ent.item(), 3),
                  vis_loss=vl and round(vl, 4), grid_loss=gl and round(gl, 4))
+      if args.agent == 'pirnn':
+        h_max = h_pi.abs().max().item()
+        if not np.isfinite(h_max):
+          raise RuntimeError('pirnn state went non-finite')
+        rec['h_max'] = round(h_max, 2)
       print(json.dumps(rec), flush=True)
       metrics_f.write(json.dumps(rec) + '\n')
       metrics_f.flush()
