@@ -35,6 +35,12 @@ def _act(look_lr=0, look_ud=0, strafe=0, move=0, fire=0, jump=0, crouch=0):
                   dtype=np.intc)
 
 
+# DeepMind Lab's standard navigation action set (Mnih et al. 2016 A3C and
+# the DMLab-30 baselines the paper's agents were built on), minus FIRE,
+# which does nothing in the goal-navigation levels. The combined
+# forward+look actions matter: without them an agent must stop to turn, so
+# a random policy barely displaces and almost never encounters a goal —
+# the only learning signal these sparse tasks provide.
 ACTIONS = [
     ('turn_left', _act(look_lr=-_ROT_PIX)),
     ('turn_right', _act(look_lr=_ROT_PIX)),
@@ -42,6 +48,8 @@ ACTIONS = [
     ('backward', _act(move=-1)),
     ('strafe_left', _act(strafe=-1)),
     ('strafe_right', _act(strafe=1)),
+    ('forward_turn_left', _act(look_lr=-_ROT_PIX, move=1)),
+    ('forward_turn_right', _act(look_lr=_ROT_PIX, move=1)),
 ]
 NUM_ACTIONS = len(ACTIONS)
 

@@ -55,9 +55,10 @@ def main():
     return obs
 
   dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
-  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
-      PolicyNet().to(dev)
   ck = torch.load(args.ckpt, map_location=dev)
+  n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
+  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
+      PolicyNet(n_actions=n_actions).to(dev)
   vision.load_state_dict(ck['vision'])
   grid.load_state_dict(ck['grid'])
   policy.load_state_dict(ck['policy'])
@@ -120,7 +121,8 @@ def main():
           grid_state[0][i].zero_(); grid_state[1][i].zero_()
           pol_state[0][i].zero_(); pol_state[1][i].zero_()
       prev_action = a
-      prev_reward = torch.as_tensor(rewards, device=dev)
+      # Clipped to match training: prev_reward is a policy input.
+      prev_reward = torch.as_tensor(rewards, device=dev).clamp(-1.0, 1.0)
 
   venv.close()
   H = np.asarray(H); D = np.asarray(D); G = np.asarray(G)

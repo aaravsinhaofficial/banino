@@ -172,7 +172,8 @@ def actor_proc(rank, cfg, shared, ctrl):
     q = ctrl['queue']
     env = _make_env(cfg, rank)
 
-    vision_l, grid_l, policy_l = VisionCNN(), GridModule(), PolicyNet()
+    vision_l, grid_l = VisionCNN(), GridModule()
+    policy_l = PolicyNet(n_actions=cfg['n_actions'])
     grid_l.train()  # dropout active while acting, as in the sync trainer
     opt = SharedRMSprop(shared['policy'].parameters(), lr=cfg['lr'],
                         square_avgs=shared['pol_sq'])
@@ -256,7 +257,10 @@ def actor_proc(rank, cfg, shared, ctrl):
         pis.append(pi)
         vs.append(v)
         acts.append(a)
-        rews.append(float(reward))
+        r_learn = float(reward)
+        if cfg['reward_clip'] > 0:
+          r_learn = max(-cfg['reward_clip'], min(cfg['reward_clip'], r_learn))
+        rews.append(r_learn)
         dones.append(bool(done))
         if reward > 0:
           goal_code = g.detach().clone()
@@ -319,7 +323,9 @@ def actor_proc(rank, cfg, shared, ctrl):
         ctrl['frames'].value += T * rep
       try:
         q.put_nowait(('stat', rank, float(ent.item()),
-                      float(v_all.detach().mean())))
+                      float(v_all.detach().mean()),
+                      float(pol_loss.detach()), float(val_loss.detach()),
+                      float(adv.abs().mean())))
       except queue_lib.Full:
         pass
     env.close()
@@ -459,6 +465,15 @@ def main():
                        '0 = frames budget only.')
   ap.add_argument('--seed', type=int, default=1)
   ap.add_argument('--fake', action='store_true')
+  ap.add_argument('--reward_clip', type=float, default=1.0,
+                  help='Clip the reward used for LEARNING to +/- this (0 = '
+                       'off). Reported returns stay raw. The goal levels pay '
+                       '+10, so unclipped targets make the summed value loss '
+                       '(~50 at a reward step) dominate the grad-norm-40 clip '
+                       'and swamp the policy term; clipping to 1 is the '
+                       'standard A3C treatment.')
+  ap.add_argument('--n_actions', type=int, default=0,
+                  help='0 = the env module\'s action-set size.')
   ap.add_argument('--bandit', action='store_true',
                   help='Dense-reward probe env (rl/bandit_env.py): a unit '
                        'test that the policy-gradient path can learn at all.')
@@ -467,6 +482,9 @@ def main():
   args = ap.parse_args()
   if args.replay_per_env <= 0:
     args.replay_per_env = max(10_000, args.replay_total // args.workers)
+  if args.n_actions <= 0:
+    from rl.env import NUM_ACTIONS
+    args.n_actions = NUM_ACTIONS
 
   os.makedirs(args.out, exist_ok=True)
   with open(os.path.join(args.out, 'config.json'), 'w') as f:
@@ -477,7 +495,7 @@ def main():
 
   vision = VisionCNN()
   grid = GridModule()
-  policy = PolicyNet()
+  policy = PolicyNet(n_actions=args.n_actions)
   for m in (vision, grid, policy):
     m.share_memory()
   pol_sq = [torch.zeros_like(p).share_memory_() for p in policy.parameters()]
@@ -535,6 +553,10 @@ def main():
   frames0 = frames_done
   returns_hist = collections.deque(maxlen=500)
   ents = collections.deque(maxlen=W * 4)
+  vals = collections.deque(maxlen=W * 4)
+  pol_losses = collections.deque(maxlen=W * 4)
+  val_losses = collections.deque(maxlen=W * 4)
+  advs = collections.deque(maxlen=W * 4)
   gp_buf = collections.deque(maxlen=64_000)
   vl = gl = None
   vis_done = grid_done = 0
@@ -590,6 +612,11 @@ def main():
           n_ep += 1
         elif kind == 'stat':
           ents.append(msg[2])
+          if len(msg) > 4:
+            vals.append(msg[3])
+            pol_losses.append(msg[4])
+            val_losses.append(msg[5])
+            advs.append(msg[6])
         elif kind == 'gp':
           gp_buf.append((msg[1], msg[2], msg[3]))
         elif kind == 'trainer':
@@ -620,10 +647,21 @@ def main():
         last_metrics = now
         update += 1
         fps = (frames_now - frames0) / max(now - t0, 1e-9)
+        with torch.no_grad():
+          pol_norm = float(sum(p.pow(2).sum() for p in policy.parameters())
+                           .sqrt())
+          sq_norm = float(sum(s.sum() for s in pol_sq))
         rec = dict(update=update, frames=int(frames_now), fps=round(fps),
+                   pol_norm=round(pol_norm, 4), sq_norm=round(sq_norm, 8),
                    avg_return_50=round(float(np.mean(
                        list(returns_hist)[-50:])), 2) if returns_hist else 0.0,
                    ent=round(float(np.mean(ents)), 3) if ents else None,
+                   v=round(float(np.mean(vals)), 4) if vals else None,
+                   pol_loss=round(float(np.mean(pol_losses)), 4)
+                   if pol_losses else None,
+                   val_loss=round(float(np.mean(val_losses)), 4)
+                   if val_losses else None,
+                   adv_abs=round(float(np.mean(advs)), 5) if advs else None,
                    vis_loss=vl and round(vl, 4),
                    grid_loss=gl and round(gl, 4),
                    vis_updates=vis_done, grid_updates=grid_done,

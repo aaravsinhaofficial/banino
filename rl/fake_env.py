@@ -24,6 +24,8 @@ _TARGETS = {
     3: (-1.0, 0.0, 0.0),   # backward
     4: (0.0, 1.0, 0.0),    # strafe_left
     5: (0.0, -1.0, 0.0),   # strafe_right
+    6: (1.0, 0.0, 1.0),    # forward_turn_left
+    7: (1.0, 0.0, -1.0),   # forward_turn_right
 }
 assert len(_TARGETS) == NUM_ACTIONS == len(ACTIONS)
 

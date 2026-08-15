@@ -38,12 +38,17 @@ def main():
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--out', required=True)
+  ap.add_argument('--reward_clip', type=float, default=1.0,
+                  help='Must match training: prev_reward is a policy input, '
+                       'so the agent has to see the same scale it learned '
+                       'on. Scores are always reported raw.')
   args = ap.parse_args()
 
   dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
-  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
-      PolicyNet().to(dev)
   ck = torch.load(args.ckpt, map_location=dev)
+  n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
+  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
+      PolicyNet(n_actions=n_actions).to(dev)
   vision.load_state_dict(ck['vision'])
   grid.load_state_dict(ck['grid'])
   policy.load_state_dict(ck['policy'])
@@ -97,8 +102,10 @@ def main():
       a = torch.distributions.Categorical(logits=pi).sample()
       obs, rewards, dones = venv.step(a.cpu().numpy())
       obs = encode_vel(obs)
-      r_t = torch.as_tensor(rewards, device=dev)
-      hit = (r_t > 0).float().unsqueeze(1)
+      r_raw = torch.as_tensor(rewards, device=dev)
+      r_t = r_raw.clamp(-args.reward_clip, args.reward_clip) \
+          if args.reward_clip > 0 else r_raw
+      hit = (r_raw > 0).float().unsqueeze(1)
       goal_code = hit * g.detach() + (1 - hit) * goal_code
       ep_return += rewards
       for i in range(n):
