@@ -117,8 +117,9 @@ def main():
   cells = [load_cell(d) for d in dirs]
   chance = load_chance(args.rl)
   chance_sa = load_chance(args.rl, 'untrained_seekavoid')
+  chance_ar = load_chance(args.rl, 'untrained_arena')
   res = {'paper': PAPER, 'sync_a2c': SYNC_A2C, 'chance_goal_maze': chance,
-         'chance_seekavoid': chance_sa,
+         'chance_seekavoid': chance_sa, 'chance_arena': chance_ar,
          'async_a3c': {c['name']: c for c in cells}}
   with open(args.out, 'w') as f:
     json.dump(res, f, indent=1)
@@ -133,7 +134,8 @@ def main():
             '|---|---|---|---|---|---|---|---|']
   for c in cells:
     cfg = c.get('config', {})
-    ch = chance_sa if 'seekavoid' in c['name'] else chance
+    ch = (chance_sa if 'seekavoid' in c['name']
+          else chance_ar if 'arena' in c['name'] else chance)
     lines.append(
         f"| {c['name']} | {cfg.get('agent', '?')} | {cfg.get('workers', '?')} "
         f"| {c.get('frames', 0):,} | {fmt_score(c)} | {verdict(c, ch)} "
