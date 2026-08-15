@@ -34,8 +34,11 @@ class FakeEnv:
   """Drop-in LabEnv replacement; no deepmind_lab required."""
 
   def __init__(self, level='', seed=0, size=84, cell_m=0.25, arena_cells=11,
-               episode_len=1800):
+               episode_len=1800, blind='none'):
     del level  # unused; signature parity with LabEnv
+    if blind not in ('none', 'pos', 'all'):
+      raise ValueError(f'blind must be none/pos/all, got {blind!r}')
+    self._blind = blind
     self._rng = np.random.default_rng(int(seed))
     self._size = int(size)
     self._half = 0.5 * cell_m * arena_cells  # 1.375 m for defaults
@@ -61,10 +64,19 @@ class FakeEnv:
     self._vf = self._vs = self._vr = 0.0
 
   def _observe(self):
-    """Synthetic obs: position/heading-keyed gradient image + noise."""
+    """Synthetic obs: position/heading-keyed gradient image + noise.
+
+    blind='pos' fixes the position keys at mid-range so vision carries
+    heading but NOT location (localization must come from elsewhere, e.g.
+    a path-integration code); blind='all' fixes the heading key too.
+    """
     u = 0.5 * (self._pos[0] / self._half + 1.0)  # in [0, 1]
     v = 0.5 * (self._pos[1] / self._half + 1.0)
     h = 0.5 * (self._hd / np.pi + 1.0)
+    if self._blind in ('pos', 'all'):
+      u = v = 0.5
+    if self._blind == 'all':
+      h = 0.5
     img = np.empty((self._size, self._size, 3), dtype=np.float32)
     img[..., 0] = 255.0 * (0.5 * self._gu + 0.5 * u)
     img[..., 1] = 255.0 * (0.5 * self._gv + 0.5 * v)

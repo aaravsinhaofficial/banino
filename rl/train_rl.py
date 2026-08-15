@@ -63,6 +63,11 @@ def main():
   ap.add_argument('--grid_updates', type=int, default=2)
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--fake', action='store_true')
+  ap.add_argument('--fake_blind', choices=['none', 'pos', 'all'],
+                  default='none',
+                  help="(--fake) 'pos': the synthetic image carries heading "
+                       'but not location, so localization must come from '
+                       "the spatial code; 'all': no cues at all.")
   ap.add_argument('--seed', type=int, default=1)
   ap.add_argument('--resume', action='store_true',
                   help='Resume from <out>/resume.pt if present (models, '
@@ -122,8 +127,8 @@ def main():
   n = args.n_envs
   venv = SubprocVecEnv(n, args.level, base_seed=args.seed * 1000,
                        fake=args.fake,
-                       env_kwargs=dict(arena_cells=args.arena_cells,
-                                       cell_m=0.25) if not args.fake else None)
+                       env_kwargs=dict(blind=args.fake_blind) if args.fake
+                       else dict(arena_cells=args.arena_cells, cell_m=0.25))
 
   step_dt = args.action_repeat / 60.0  # seconds per decision step
 

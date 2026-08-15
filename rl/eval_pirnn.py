@@ -97,8 +97,8 @@ def main():
   n = args.n_envs
   venv = SubprocVecEnv(
       n, cfg['level'], base_seed=args.base_seed, fake=cfg['fake'],
-      env_kwargs=dict(arena_cells=cfg['arena_cells'],
-                      cell_m=0.25) if not cfg['fake'] else None)
+      env_kwargs=dict(blind=cfg.get('fake_blind', 'none')) if cfg['fake']
+      else dict(arena_cells=cfg['arena_cells'], cell_m=0.25))
   obs = venv.reset_all()
 
   pol_state = policy.zero_state(n, dev)
