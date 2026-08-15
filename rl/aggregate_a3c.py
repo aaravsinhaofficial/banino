@@ -43,6 +43,11 @@ def load_cell(d):
   p = os.path.join(d, 'eval_scores.json')
   if os.path.exists(p):
     cell['eval'] = json.load(open(p))
+  # Peak-checkpoint eval (finalize_a3c.sh): these runs swing widely during
+  # training, so the final checkpoint alone understates what was reached.
+  p = os.path.join(d, 'peak', 'eval_scores.json')
+  if os.path.exists(p):
+    cell['eval_peak'] = json.load(open(p))
   p = os.path.join(d, 'config.json')
   if os.path.exists(p):
     cell['config'] = json.load(open(p))
@@ -107,13 +112,27 @@ def verdict(cell, chance):
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument('--rl', default='rl_runs')
-  ap.add_argument('--prefix', default='a3c_goal')
+  ap.add_argument('--prefix', default='',
+                  help='Glob prefix; ignored when --cells is given. Prefer '
+                       '--cells: rl_runs/ also holds smoke tests, diagnostic '
+                       'probes, and other sessions\' runs.')
+  ap.add_argument('--cells', default=('a3c_goal_grid,a3c_goal_place,'
+                                      'a3c_goal_a3c,a3c_goal_grid_hi,'
+                                      'a3c_arena_grid,a3c_arena_place,'
+                                      'a3c_arena_grid2,a3c_arena_place2,'
+                                      'a3c_seekavoid'),
+                  help='Comma-separated cell directory names to report.')
   ap.add_argument('--out', default='A3C_RESULTS.json')
   ap.add_argument('--md', default='A3C_RESULTS.md')
   args = ap.parse_args()
 
-  dirs = sorted(d for d in glob.glob(os.path.join(args.rl, args.prefix + '*'))
-                if os.path.isdir(d))
+  if args.cells and not args.prefix:
+    dirs = [os.path.join(args.rl, n) for n in args.cells.split(',')
+            if os.path.isdir(os.path.join(args.rl, n))]
+  else:
+    dirs = sorted(d for d in glob.glob(os.path.join(args.rl,
+                                                    args.prefix + '*'))
+                  if os.path.isdir(d))
   cells = [load_cell(d) for d in dirs]
   chance = load_chance(args.rl)
   chance_sa = load_chance(args.rl, 'untrained_seekavoid')
@@ -129,18 +148,19 @@ def main():
     lines += [f"**Chance line (untrained network, 100 episodes): "
               f"{chance['mean_score']:.1f} ± {chance['sem']:.1f}** on the goal "
               'maze. Any score not clearly above this is not navigation.', '']
-  lines += ['| cell | agent | workers | frames | eval score (100 ep) | '
-            'vs chance | train return (tail) | peak |',
+  lines += ['| cell | agent | workers | frames | eval: final ckpt | '
+            'eval: peak ckpt | vs chance (final) | train peak |',
             '|---|---|---|---|---|---|---|---|']
   for c in cells:
     cfg = c.get('config', {})
     ch = (chance_sa if 'seekavoid' in c['name']
           else chance_ar if 'arena' in c['name'] else chance)
+    pk = ('n/a' if not c.get('eval_peak') else
+          f"{c['eval_peak']['mean_score']:.1f} ± {c['eval_peak']['sem']:.1f}")
     lines.append(
         f"| {c['name']} | {cfg.get('agent', '?')} | {cfg.get('workers', '?')} "
-        f"| {c.get('frames', 0):,} | {fmt_score(c)} | {verdict(c, ch)} "
-        f"| {c.get('train_return_tail_mean', 'n/a')} "
-        f"| {c.get('train_return_peak', 'n/a')} |")
+        f"| {c.get('frames', 0):,} | {fmt_score(c)} | {pk} "
+        f"| {verdict(c, ch)} | {c.get('train_return_peak', 'n/a')} |")
   lines += ['', '## Benchmarks', '',
             '| source | grid | place-cell | A3C-baseline |', '|---|---|---|---|',
             f"| Paper (goal maze) | {PAPER['goal_maze']['grid']} | "
