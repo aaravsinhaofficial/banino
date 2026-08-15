@@ -276,10 +276,18 @@ contains two real discrepancies:
    direction activity vector h*". Ours was fed zeros there, while the grid
    agent received its goal code. Every grid-vs-place comparison in this run
    therefore used an unfair control. Fixed in `rl/train_a3c.py`, but **not
-   exercised by the cells trained here**. The lesion result above suggests
-   the handicap did not drive the arena gap — the goal code is worth nothing
-   to the grid agent either — but the comparison should be rerun to settle
-   it.
+   exercised by the cells trained here**.
+
+   How much this actually contaminates the arena result is answerable from
+   the lesion above. If the goal code were what gave the grid agent its
+   edge, zeroing it would drop the grid agent toward the control; it does
+   not move performance at all. So the input the control was missing is
+   worth nothing to the agent that had it, and the surviving comparison is
+   between the two agents' *current* position codes — a 512-unit grid
+   bottleneck versus 268 units of predicted place/head-direction code —
+   which is close to the comparison the paper intends. That is an argument,
+   not a measurement, and the rerun with the corrected control is still
+   needed to settle it.
 2. **The conv net is too small.** SI 3b specifies four convolutional layers
    (16/32/64/128 filters, 5×5, stride 2, padding 2) followed by a 256-unit
    fully connected layer, used for both the vision module and the
