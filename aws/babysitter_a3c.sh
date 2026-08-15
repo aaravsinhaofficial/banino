@@ -7,7 +7,10 @@
 # training and just runs the eval, so late crashes still produce a score.
 # Run inside tmux:
 #   bash aws/babysitter_a3c.sh <train_until_epoch> \
-#     "name:agent:level:workers:itype" ... >> rl_runs/babysitter_a3c.log 2>&1
+#     "name:agent:level:workers:itype[:extra-args]" ...
+#     >> rl_runs/babysitter_a3c.log 2>&1
+# The optional extra-args field (e.g. "--lr 3e-5") is re-applied on every
+# relaunch, so per-cell hyperparameters survive restarts.
 set -u
 export AWS_PROFILE=banino-repro AWS_DEFAULT_REGION=us-east-1
 cd /home/ec2-user/banino
@@ -28,7 +31,8 @@ while true; do
   fi
   all_done=1
   for cell in "${CELLS[@]}"; do
-    IFS=: read -r name agent level workers itype <<< "$cell"
+    IFS=: read -r name agent level workers itype extra <<< "$cell"
+    extra=${extra:-}
     if finished "$name"; then
       echo "$(date -u +%H:%M) $name: finished"
       continue
@@ -46,7 +50,7 @@ while true; do
       fi
       RELAUNCHES[$name]=$((n + 1))
       id=$(bash aws/provision_a3c.sh "$name" "$agent" "$UNTIL" "$level" \
-             "$workers" "$itype" ondemand 2>&1 | tail -1)
+             "$workers" "$itype" ondemand 1000000000 "$extra" 2>&1 | tail -1)
       echo "$(date -u +%H:%M) $name: relaunched ($id)"
     fi
   done
