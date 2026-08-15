@@ -123,10 +123,12 @@ through the identical 100-episode protocol, per task:
 falls monotonically from its ln(n_actions) ceiling — the quantity that stayed
 pinned at exactly the maximum for the whole of the previous 10⁹-frame run.
 
-- **Dense control (`seekavoid`) — decisive.** Return 1.0 → 7.2 at 16.5M
-  frames, 6.4× the 1.12 chance line, entropy 2.08 → 1.55. This pipeline
-  learns a real DM-Lab task from raw vision. Any shortfall on the paper's
-  task is therefore about reward sparsity and compute, not implementation.
+- **Dense control (`seekavoid`) — decisive, and now evaluated.** Frozen-policy
+  eval at 34.4M frames: **16.65 ± 0.42 vs chance 1.12 ± 0.11**, a 15×
+  improvement (~36σ), with training entropy 2.08 → 0.65. This pipeline learns
+  a real DM-Lab task from raw vision, so any shortfall on the paper's task is
+  about reward sparsity and compute, not implementation. The cell was then
+  retired early and its capacity given to a second arena seed.
 - **Goal maze (paper Fig. 3).** All four cells climb out of the untrained
   band at ~8–9M frames; 12–18 by 25M against chance 7.2. No agent separation
   yet (the paper's central claim), and it is far too early to expect one.
