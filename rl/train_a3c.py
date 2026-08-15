@@ -424,9 +424,13 @@ def main():
   ap.add_argument('--pc_scale', type=float, default=0.1)
   ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
                   default='raw')
-  ap.add_argument('--replay_per_env', type=int, default=46_875,
-                  help='Replay steps per actor (32 actors -> 1.5M steps, '
-                       '~32 GB shared memory; size --shm accordingly).')
+  ap.add_argument('--replay_per_env', type=int, default=0,
+                  help='Replay steps per actor; 0 = auto, so the total is '
+                       '--replay_total steps whatever the worker count.')
+  ap.add_argument('--replay_total', type=int, default=1_500_000,
+                  help='Total replay steps across actors (frames dominate: '
+                       '84*84*3 B/step, so 1.5M steps ~= 31.8 GB of shared '
+                       'memory — /dev/shm must be sized for it).')
   ap.add_argument('--vis_per_frames', type=int, default=1600,
                   help='One vision update per this many env frames '
                        '(sync run: 8 per 12800-frame cycle).')
@@ -435,7 +439,7 @@ def main():
                        '(sync run: 2 per 12800-frame cycle).')
   ap.add_argument('--trainer_threads', type=int, default=6,
                   help='Torch threads per supervised-learner process.')
-  ap.add_argument('--gp_every', type=int, default=8,
+  ap.add_argument('--gp_every', type=int, default=32,
                   help='Sample (grid code, pos, hd) every k-th step for the '
                        'ratemap dumps.')
   ap.add_argument('--max_seconds', type=int, default=0,
@@ -447,6 +451,8 @@ def main():
   ap.add_argument('--resume', action='store_true')
   ap.add_argument('--reset_grid', action='store_true')
   args = ap.parse_args()
+  if args.replay_per_env <= 0:
+    args.replay_per_env = max(10_000, args.replay_total // args.workers)
 
   os.makedirs(args.out, exist_ok=True)
   with open(os.path.join(args.out, 'config.json'), 'w') as f:

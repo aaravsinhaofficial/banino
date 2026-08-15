@@ -22,8 +22,11 @@ NOW=$(date +%s)
 # Failsafe poweroff: train window + 100 min for boot/eval/upload slack.
 FAILSAFE_MIN=$(( (UNTIL - NOW) / 60 + 100 ))
 [ "$FAILSAFE_MIN" -lt 110 ] && FAILSAFE_MIN=110
-# /dev/shm must hold the actor-owned replay (~21.2 KB/step) plus slack.
-SHM_GB=$(( WORKERS * 46875 * 22 / 1000000000 + 6 ))
+# /dev/shm must hold the actor-owned replay: 84*84*3 B of frame per step
+# (plus small vel/pos/hd rows), for --replay_total steps in all, then slack
+# for the shared params and optimizer statistics.
+REPLAY_TOTAL=1500000
+SHM_GB=$(( REPLAY_TOTAL * 21168 / 1000000000 + 8 ))
 
 AMI=$(aws ec2 describe-images --profile $PROFILE --region $REGION \
   --owners amazon \
@@ -39,12 +42,13 @@ USER_DATA=$(IMAGE_URL="$IMAGE_URL" REPO_URL="$REPO_URL" PUT_URL="$PUT_URL" \
   GET_RESULTS_URL="$GET_RESULTS_URL" AGENT="$AGENT" NAME="$NAME" \
   FRAMES="$FRAMES" LEVEL="$LEVEL" EXTRA="$EXTRA" WORKERS="$WORKERS" \
   TRAIN_UNTIL_EPOCH="$UNTIL" FAILSAFE_MIN="$FAILSAFE_MIN" \
+  REPLAY_TOTAL="$REPLAY_TOTAL" \
   SHM="${SHM_GB}g" $PY - <<'EOF'
 import base64, os
 s = open('aws/user_data_a3c.sh').read()
 for k in ['IMAGE_URL', 'REPO_URL', 'PUT_URL', 'GET_RESULTS_URL', 'AGENT',
           'NAME', 'FRAMES', 'LEVEL', 'EXTRA', 'WORKERS',
-          'TRAIN_UNTIL_EPOCH', 'FAILSAFE_MIN', 'SHM']:
+          'TRAIN_UNTIL_EPOCH', 'FAILSAFE_MIN', 'SHM', 'REPLAY_TOTAL']:
   s = s.replace('__%s__' % k, os.environ[k])
 print(base64.b64encode(s.encode()).decode())
 EOF

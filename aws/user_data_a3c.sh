@@ -29,7 +29,8 @@ if [ "$MAXS" -gt 300 ]; then
     dmlab-rl:cpu python3 -m rl.train_a3c \
     --level "__LEVEL__" __EXTRA__ \
     --out rl_runs/__NAME__ --agent __AGENT__ --frames __FRAMES__ \
-    --workers __WORKERS__ --max_seconds "$MAXS" --resume \
+    --workers __WORKERS__ --replay_total __REPLAY_TOTAL__ \
+    --max_seconds "$MAXS" --resume \
     >> "$OUT/train.log" 2>&1
 fi
 upload
