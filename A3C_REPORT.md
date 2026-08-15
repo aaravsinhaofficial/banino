@@ -106,6 +106,37 @@ rate lands at the top of the SI's sampled range — the arena cells use the
 paper's 32), reward clipping (not mentioned in the SI), and ~2.8×10⁸ frames
 per cell against the paper's 10⁹ per replica with best-30-of-60 selection.
 
+## Measured chance lines
+
+Every score below is judged against an untrained random-init network run
+through the identical 100-episode protocol, per task:
+
+| task | untrained network | uniform-random actions |
+|---|---|---|
+| `explore_goal_locations_small` | 7.2 ± 1.07 | ~0.8 |
+| `square_arena_goal` | 3.2 ± 0.60 | ~8.3 (6-episode probe) |
+| `seekavoid_arena_01` | 1.12 ± 0.11 | ~1.5 (6-episode probe) |
+
+## Interim results (~25M of ~280M frames per cell)
+
+**The fixes work.** Every cell has left its chance band, and policy entropy
+falls monotonically from its ln(n_actions) ceiling — the quantity that stayed
+pinned at exactly the maximum for the whole of the previous 10⁹-frame run.
+
+- **Dense control (`seekavoid`) — decisive.** Return 1.0 → 7.2 at 16.5M
+  frames, 6.4× the 1.12 chance line, entropy 2.08 → 1.55. This pipeline
+  learns a real DM-Lab task from raw vision. Any shortfall on the paper's
+  task is therefore about reward sparsity and compute, not implementation.
+- **Goal maze (paper Fig. 3).** All four cells climb out of the untrained
+  band at ~8–9M frames; 12–18 by 25M against chance 7.2. No agent separation
+  yet (the paper's central claim), and it is far too early to expect one.
+- **Square arena (paper Fig. 2).** 4.4–5.0 against chance 3.2 ± 0.6 — above
+  baseline but only ~2σ, and moving slowly; these cells run 32 workers (the
+  paper's thread count) so they accumulate updates at half the maze cells'
+  rate.
+
+![learning curves](report/fig_a3c.png)
+
 ## Results
 
 <!-- filled in at deadline from A3C_RESULTS.md -->
