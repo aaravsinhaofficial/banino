@@ -38,6 +38,12 @@ def main():
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--out', required=True)
+  ap.add_argument('--lesion_goal', action='store_true',
+                  help="Zero the goal code fed to the policy LSTM (the "
+                       "paper's Extended Data Fig. 6c lesion). Used here to "
+                       'test whether the grid agent\'s advantage over our '
+                       'place-cell control is just the goal code, which that '
+                       'control was never given.')
   ap.add_argument('--reward_clip', type=float, default=1.0,
                   help='Must match training: prev_reward is a policy input, '
                        'so the agent has to see the same scale it learned '
@@ -89,11 +95,13 @@ def main():
       mask = (torch.rand(n, 1, device=dev) < 0.05).float()
       g, grid_state = grid.step(vel, vis_pc, vis_hd, mask, grid_state)
       if args.agent == 'grid':
-        g_in, goal_in = g, goal_code
+        g_in = g
+        goal_in = torch.zeros_like(goal_code) if args.lesion_goal else goal_code
       elif args.agent == 'placecell':
         g_in = torch.cat([vis_pc, vis_hd,
                           torch.zeros(n, 512 - 268, device=dev)], -1)
-        goal_in = torch.zeros_like(goal_code)
+        goal_in = (torch.zeros_like(goal_code) if args.lesion_goal
+                   else goal_code)
       else:
         g_in = torch.zeros_like(g)
         goal_in = torch.zeros_like(goal_code)
@@ -106,7 +114,7 @@ def main():
       r_t = r_raw.clamp(-args.reward_clip, args.reward_clip) \
           if args.reward_clip > 0 else r_raw
       hit = (r_raw > 0).float().unsqueeze(1)
-      goal_code = hit * g.detach() + (1 - hit) * goal_code
+      goal_code = hit * g_in.detach() + (1 - hit) * goal_code
       ep_return += rewards
       for i in range(n):
         if dones[i]:

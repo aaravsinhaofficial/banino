@@ -221,12 +221,17 @@ def actor_proc(rank, cfg, shared, ctrl):
           vis_hd = torch.softmax(hd_l, -1)
           mask = (torch.rand(1, 1) < 0.05).float()
           g, grid_state = grid_l.step(vel, vis_pc, vis_hd, mask, grid_state)
+        # Each agent's policy sees a CURRENT code and the code observed the
+        # last time it reached the goal. SI 3b specifies the goal input for
+        # the place-cell agent too ("the goal predicted place cell activity
+        # vector y*, and goal head direction activity vector h*"); it was
+        # previously fed zeros, which handicapped the control.
         if cfg['agent'] == 'grid':
           g_in, goal_in = g, goal_code
         elif cfg['agent'] == 'placecell':
           g_in = torch.cat([vis_pc, vis_hd, torch.zeros(1, 512 - 268)], -1)
-          goal_in = torch.zeros_like(goal_code)
-        else:
+          goal_in = goal_code
+        else:  # A3C baseline: no grid or place-cell input at all (SI 3b)
           g_in = torch.zeros_like(g)
           goal_in = torch.zeros_like(goal_code)
         pi, v, pol_state = policy_l.step(rgb, g_in, goal_in, prev_action,
@@ -263,7 +268,8 @@ def actor_proc(rank, cfg, shared, ctrl):
         rews.append(r_learn)
         dones.append(bool(done))
         if reward > 0:
-          goal_code = g.detach().clone()
+          # Snapshot whatever code THIS agent uses, not always the grid code.
+          goal_code = g_in.detach().clone()
         ep_return += reward
         if done:
           try:
