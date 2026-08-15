@@ -38,9 +38,14 @@ class GridModule(nn.Module):
   """Streaming grid network for the agent (LSTMCell + dropout bottleneck)."""
 
   def __init__(self, n_pc=256, n_hdc=12, nh_lstm=128, nh_bottleneck=512,
-               dropout=0.5):
+               dropout=0.5, n_vel=4):
+    """n_vel: width of the velocity input. The paper feeds the agent's grid
+    network four components — the two translation velocities u, v and the
+    sine and cosine of the angular velocity (Methods) — so 4 is the faithful
+    setting; 3 reproduces this repo's earlier [u, v, raw omega] runs."""
     super().__init__()
-    self.n_in = 3 + n_pc + n_hdc
+    self.n_vel = n_vel
+    self.n_in = n_vel + n_pc + n_hdc
     self.cell = nn.LSTMCell(self.n_in, nh_lstm)
     self.bottleneck = nn.Linear(nh_lstm, nh_bottleneck, bias=False)
     self.dropout = nn.Dropout(dropout)

@@ -154,13 +154,28 @@ def _make_env(cfg, rank):
 
 
 def _encode_vel1(v, cfg):
-  """Single-obs velocity re-encoding (parity with train_rl.encode_vel)."""
-  if cfg['vel_encoding'] != 'supervised':
-    return v
+  """Encode one raw [u, v, omega] observation for the grid network.
+
+  'paper'      -> [u, v, sin(omega*dt), cos(omega*dt)] (4): the Methods'
+                  "two translation velocities u and v ... the sine and
+                  cosine of the angular velocity".
+  'raw'        -> [u, v, omega] (3): this repo's earlier runs.
+  'supervised' -> [speed, sin, cos] (3): the SUPERVISED experiment's
+                  convention. Wrong for the agent — it collapses u and v,
+                  which the paper keeps separate precisely because a DM-Lab
+                  agent can move in a direction other than its facing.
+  """
   step_dt = cfg['action_repeat'] / 60.0
-  dtheta = v[2] * step_dt
-  return np.array([np.hypot(v[0], v[1]), np.sin(dtheta), np.cos(dtheta)],
-                  dtype=np.float32)
+  enc = cfg['vel_encoding']
+  if enc == 'paper':
+    dtheta = v[2] * step_dt
+    return np.array([v[0], v[1], np.sin(dtheta), np.cos(dtheta)],
+                    dtype=np.float32)
+  if enc == 'supervised':
+    dtheta = v[2] * step_dt
+    return np.array([np.hypot(v[0], v[1]), np.sin(dtheta), np.cos(dtheta)],
+                    dtype=np.float32)
+  return v
 
 
 def actor_proc(rank, cfg, shared, ctrl):
@@ -172,9 +187,13 @@ def actor_proc(rank, cfg, shared, ctrl):
     q = ctrl['queue']
     env = _make_env(cfg, rank)
 
-    vision_l, grid_l = VisionCNN(), GridModule()
+    vision_l = VisionCNN()
+    grid_l = GridModule(n_vel=cfg['n_vel'])
     policy_l = PolicyNet(n_actions=cfg['n_actions'])
-    grid_l.train()  # dropout active while acting, as in the sync trainer
+    # Dropout on the grid code while acting is this repo's old behaviour and
+    # is not in the paper; default to eval() so the policy sees the expected
+    # code rather than a fresh 50% mask every step.
+    grid_l.train() if cfg['grid_dropout_when_acting'] else grid_l.eval()
     opt = SharedRMSprop(shared['policy'].parameters(), lr=cfg['lr'],
                         square_avgs=shared['pol_sq'])
 
@@ -214,7 +233,14 @@ def actor_proc(rank, cfg, shared, ctrl):
       for _ in range(T):
         rgb = torch.as_tensor(obs['rgb']).permute(2, 0, 1).float().div_(255.)
         rgb = rgb.unsqueeze(0)
-        vel = torch.as_tensor(obs['vel']).unsqueeze(0)
+        # Methods: velocity noise (sigma=0.01) is applied "throughout
+        # training and testing", i.e. it is part of the task, not a
+        # replay-only augmentation.
+        vel_np = obs['vel']
+        if cfg['vel_noise'] > 0:
+          vel_np = vel_np + cfg['vel_noise'] * np.random.randn(
+              *vel_np.shape).astype(np.float32)
+        vel = torch.as_tensor(vel_np).unsqueeze(0)
         with torch.no_grad():
           pc_l, hd_l = vision_l(rgb)
           vis_pc = torch.softmax(pc_l, -1)
@@ -394,7 +420,7 @@ def trainer_proc(cfg, shared, ctrl, kind):
                 and ctrl['frames'].value >= cfg['freeze_grid_after'])
       if frozen:
         time.sleep(1.0)
-      elif done < ctrl['frames'].value // per_frames:
+      elif per_frames <= 0 or done < ctrl['frames'].value // per_frames:
         if kind == 'vision':
           loss = agent_lib.vision_update(vision, opt, replay, pc_ens, hd_ens,
                                          rng, 'cpu')
@@ -449,8 +475,25 @@ def main():
   ap.add_argument('--arena_half_m', type=float, default=1.375)
   ap.add_argument('--arena_cells', type=int, default=11)
   ap.add_argument('--pc_scale', type=float, default=0.1)
-  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
-                  default='raw')
+  ap.add_argument('--vel_encoding', choices=['paper', 'raw', 'supervised'],
+                  default='paper',
+                  help="'paper' = [u, v, sin(w*dt), cos(w*dt)] per Methods; "
+                       "'raw' = [u, v, w] (this repo's earlier runs).")
+  ap.add_argument('--vel_noise', type=float, default=0.01,
+                  help='Gaussian velocity noise applied WHILE ACTING. '
+                       'Methods: sigma=0.01 "applied throughout training and '
+                       'testing". Previously applied only inside the replay '
+                       'grid trainer, so the module trained on noisy '
+                       'velocity and ran on clean.')
+  ap.add_argument('--grid_dropout_when_acting', action='store_true',
+                  help='Keep the grid module in train() mode while acting, '
+                       'so the policy sees a fresh 50%% dropout mask of the '
+                       'grid code every step (this repo\'s earlier '
+                       'behaviour). The paper does not specify it, and its '
+                       'lesion protocol — training with 20%% dropout on the '
+                       'goal code so the LSTM "would become robust" — '
+                       'implies the code fed to the policy was not already '
+                       '50%% corrupted. Default is eval() mode.')
   ap.add_argument('--replay_per_env', type=int, default=0,
                   help='Replay steps per actor; 0 = auto, so the total is '
                        '--replay_total steps whatever the worker count.')
@@ -458,12 +501,17 @@ def main():
                   help='Total replay steps across actors (frames dominate: '
                        '84*84*3 B/step, so 1.5M steps ~= 31.8 GB of shared '
                        'memory — /dev/shm must be sized for it).')
-  ap.add_argument('--vis_per_frames', type=int, default=1600,
-                  help='One vision update per this many env frames '
-                       '(sync run: 8 per 12800-frame cycle).')
-  ap.add_argument('--grid_per_frames', type=int, default=6400,
-                  help='One grid update per this many env frames '
-                       '(sync run: 2 per 12800-frame cycle).')
+  ap.add_argument('--vis_per_frames', type=int, default=0,
+                  help='Throttle: one vision update per this many env '
+                       'frames. 0 = unthrottled, which is what the paper '
+                       'does (one dedicated thread per supervised learner, '
+                       'running continuously). The old 1600/6400 defaults '
+                       'were carried over from the synchronous trainer and '
+                       'capped the grid network at ~38k updates over a run, '
+                       'against the 300k the supervised experiment needed '
+                       'for grids to form (SI Table 1).')
+  ap.add_argument('--grid_per_frames', type=int, default=0,
+                  help='Throttle for the grid learner; 0 = unthrottled.')
   ap.add_argument('--trainer_threads', type=int, default=6,
                   help='Torch threads per supervised-learner process.')
   ap.add_argument('--gp_every', type=int, default=32,
@@ -501,6 +549,7 @@ def main():
   if args.n_actions <= 0:
     from rl.env import NUM_ACTIONS
     args.n_actions = NUM_ACTIONS
+  args.n_vel = 4 if args.vel_encoding == 'paper' else 3
 
   os.makedirs(args.out, exist_ok=True)
   with open(os.path.join(args.out, 'config.json'), 'w') as f:
@@ -510,7 +559,7 @@ def main():
   ctx = mp.get_context('spawn')
 
   vision = VisionCNN()
-  grid = GridModule()
+  grid = GridModule(n_vel=args.n_vel)
   policy = PolicyNet(n_actions=args.n_actions)
   for m in (vision, grid, policy):
     m.share_memory()
@@ -520,7 +569,7 @@ def main():
   shared = dict(
       vision=vision, grid=grid, policy=policy, pol_sq=pol_sq,
       frames=torch.zeros(W, cap, 84, 84, 3, dtype=torch.uint8).share_memory_(),
-      vels=torch.zeros(W, cap, 3).share_memory_(),
+      vels=torch.zeros(W, cap, args.n_vel).share_memory_(),
       poss=torch.zeros(W, cap, 2).share_memory_(),
       hds=torch.zeros(W, cap).share_memory_(),
       eps=torch.full((W, cap), -1, dtype=torch.int64).share_memory_(),

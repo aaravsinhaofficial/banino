@@ -37,12 +37,17 @@ def _act(look_lr=0, look_ud=0, strafe=0, move=0, fire=0, jump=0, crouch=0):
                   dtype=np.intc)
 
 
-# DeepMind Lab's standard navigation action set (Mnih et al. 2016 A3C and
-# the DMLab-30 baselines the paper's agents were built on), minus FIRE,
-# which does nothing in the goal-navigation levels. The combined
-# forward+look actions matter: without them an agent must stop to turn, so
-# a random policy barely displaces and almost never encounters a goal —
-# the only learning signal these sparse tasks provide.
+# The paper specifies SIX actions: "The action space is discrete (six
+# actions) but affords fine-grained motor control (that is, the agent could
+# rotate in small increments, accelerate forwards, backwards or sideways, or
+# effect rotational acceleration while moving)" (Methods), and the actor is
+# "a linear layer with six units". The first six below are that set.
+#
+# BANINO_ACTION_SET=8 appends forward+look-left/right (DeepMind Lab's
+# standard navigation set minus FIRE). That is NOT the paper's action space
+# and it changes the untrained-network baseline substantially (3.9 -> 7.2 on
+# explore_goal_locations_small), so scores from the two sets are not
+# comparable and each needs its own measured chance line.
 ACTIONS = [
     ('turn_left', _act(look_lr=-_ROT_PIX)),
     ('turn_right', _act(look_lr=_ROT_PIX)),
@@ -50,17 +55,18 @@ ACTIONS = [
     ('backward', _act(move=-1)),
     ('strafe_left', _act(strafe=-1)),
     ('strafe_right', _act(strafe=1)),
-    ('forward_turn_left', _act(look_lr=-_ROT_PIX, move=1)),
-    ('forward_turn_right', _act(look_lr=_ROT_PIX, move=1)),
 ]
+if os.environ.get('BANINO_ACTION_SET') == '8':
+  ACTIONS = ACTIONS + [
+      ('forward_turn_left', _act(look_lr=-_ROT_PIX, move=1)),
+      ('forward_turn_right', _act(look_lr=_ROT_PIX, move=1)),
+  ]
 
 # The paper's actor is "a linear layer with six units" (Methods, agent
 # architecture), i.e. six discrete actions; it does not say which six.
 # BANINO_ACTION_SET=6 truncates to the first six — the set this repo used
 # before 2026-08-15 — so results from the two action sets can be compared
 # against matched baselines.
-if os.environ.get('BANINO_ACTION_SET') == '6':
-  ACTIONS = ACTIONS[:6]
 NUM_ACTIONS = len(ACTIONS)
 
 # RGB observation fallbacks: (name, planar layout?).

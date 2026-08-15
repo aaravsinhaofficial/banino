@@ -37,18 +37,27 @@ def main():
   ap.add_argument('--fake', action='store_true')
   ap.add_argument('--device', default='cuda:0')
   ap.add_argument('--out', required=True)
-  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
-                  default='raw', help='Must match the training run.')
+  ap.add_argument('--vel_encoding', choices=['paper', 'raw', 'supervised'],
+                  default=None, help='Must match the training run.')
   ap.add_argument('--action_repeat', type=int, default=4)
   ap.add_argument('--arena_cells', type=int, default=11)
   args = ap.parse_args()
 
   step_dt = args.action_repeat / 60.0
 
+  # Default to whatever the checkpoint was trained with: a 4-wide grid
+  # input means the paper encoding [u, v, sin, cos], 3 means raw [u, v, w].
+  if args.vel_encoding is None:
+    args.vel_encoding = 'paper' if n_vel == 4 else 'raw'
+
   def encode_vel(obs):
-    if args.vel_encoding == 'supervised':
-      v = obs['vel']
-      dtheta = v[:, 2] * step_dt
+    v = obs['vel']
+    dtheta = v[:, 2] * step_dt
+    if args.vel_encoding == 'paper':
+      obs['vel'] = np.stack([v[:, 0], v[:, 1],
+                             np.sin(dtheta), np.cos(dtheta)],
+                            axis=1).astype(np.float32)
+    elif args.vel_encoding == 'supervised':
       obs['vel'] = np.stack([np.hypot(v[:, 0], v[:, 1]),
                              np.sin(dtheta), np.cos(dtheta)],
                             axis=1).astype(np.float32)
@@ -57,7 +66,9 @@ def main():
   dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
   ck = torch.load(args.ckpt, map_location=dev)
   n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
-  vision, grid, policy = VisionCNN().to(dev), GridModule().to(dev), \
+  # Grid LSTM input width tells us the velocity encoding the run used.
+  n_vel = ck['grid']['cell.weight_ih'].shape[1] - 256 - 12
+  vision, grid, policy = VisionCNN().to(dev), GridModule(n_vel=n_vel).to(dev), \
       PolicyNet(n_actions=n_actions).to(dev)
   vision.load_state_dict(ck['vision'])
   grid.load_state_dict(ck['grid'])
