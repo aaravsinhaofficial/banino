@@ -139,6 +139,23 @@ pinned at exactly the maximum for the whole of the previous 10⁹-frame run.
 
 ![learning curves](report/fig_a3c.png)
 
+### Goal-vector decoding, and a caveat about it
+
+Mid-run check on the arena grid agent (54M frames, ridge regression from the
+policy LSTM on held-out episodes): goal distance R² = 0.285 (shuffled control
+−0.013), MAE 0.45 m, direction error 39.2° against 90° chance. That is the
+paper's Fig. 2j/k quantity, and unlike the previous run's reported R² = 0.55
+it comes from an agent that actually navigates (35.0 vs chance 3.2) rather
+than one sitting at the untrained baseline.
+
+The caveat, which applies to the paper's analysis as much as ours: the policy
+LSTM *receives the current grid code and the goal grid code as inputs*, so
+some goal-distance information is present in its state by construction, not
+by learning. A decode R² above zero is therefore not by itself evidence of a
+learned vector computation. What carries weight is the paper's actual
+comparison — grid agent versus place-cell agent under the identical protocol
+— which is run for both arena cells at the end.
+
 ## Results
 
 <!-- filled in at deadline from A3C_RESULTS.md -->
