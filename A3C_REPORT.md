@@ -183,4 +183,60 @@ comparison — grid agent versus place-cell agent under the identical protocol
 
 ## Results
 
-<!-- filled in at deadline from A3C_RESULTS.md -->
+Single checkpoints of the 50-episode training return are far too noisy to
+rank agents — cells trade places between snapshots, and picking a
+favourable one can "show" almost any ordering. Averaging over frame windows
+removes that, and the two tasks then give opposite answers.
+
+### Square arena (paper Fig. 2) — the grid advantage reproduces
+
+Mean training return over 20M-frame windows, grid agent vs place-cell
+control, two independent seeds:
+
+| window | seed 1 grid | seed 1 place | ratio | seed 2 grid | seed 2 place | ratio |
+|---|---|---|---|---|---|---|
+| 0–20M | 11.8 | 9.4 | 1.25 | 12.7 | 12.0 | 1.05 |
+| 20–40M | 31.0 | 17.1 | 1.82 | 23.0 | 19.2 | 1.20 |
+| 40–60M | 31.5 | 21.3 | 1.48 | 30.0 | 24.3 | 1.23 |
+| 60–80M | 21.2 | 21.1 | 1.00 | 35.9 | 25.2 | 1.42 |
+| 80–100M | 26.2 | 21.2 | 1.23 | 32.2 | 30.5 | 1.06 |
+| 100–120M | 35.1 | 19.8 | 1.77 | 48.3 | 23.5 | 2.06 |
+| 120–140M | 31.2 | 23.0 | 1.36 | 48.9 | 25.4 | 1.93 |
+| 140–160M | 36.2 | 25.6 | 1.42 | — | — | — |
+| 160–200M | 32.3 | 28.4 | 1.14 | — | — | — |
+
+The grid agent leads in **17 of 17 windows across both seeds**, by ~1.4× on
+average. That is the qualitative claim of Fig. 2f — a grid-cell agent
+navigates to a hidden goal in an open arena better than a place-cell agent —
+reproduced here at ~2×10⁸ frames per cell.
+
+Caveats worth stating: windows within a run are correlated, so the effective
+sample is closer to 2 seeds than 17 windows; treating seeds as the unit,
+2 of 2 favour grid, which alone is weak evidence. The frozen-policy evals
+below are the clean test.
+
+### Goal maze (paper Fig. 3) — no agent separation
+
+Mean training return over all windows past 40M frames (chance 7.2):
+
+| grid | grid lr 2e-4 | place-cell | A3C (no grid inputs) |
+|---|---|---|---|
+| 23.7 | 24.5 | 24.1 | 24.2 |
+
+Four agents, four essentially identical numbers. The paper reports grid >
+place-cell > A3C on this family of tasks; at our scale there is no ordering
+to find. Note the A3C baseline has **no grid or goal-code inputs at all** and
+matches the grid agent exactly, so nothing about the maze result is
+attributable to the grid representation.
+
+That the two tasks disagree is itself coherent: an open arena is where a
+metric, vector-like spatial code should help most, while the maze demands
+routing around walls, for which a Euclidean goal vector is a poorer guide.
+
+### Absolute performance vs the paper
+
+All agents learn — 3–7× their measured chance lines, versus the previous
+full-scale run which never left chance. But the paper's benchmark is 289 on
+the goal maze (~29 goal arrivals per episode); our best maze cells reach
+~35–50 (3–5 arrivals). We are ~6–8× short, on ~2.4×10⁸ frames per cell
+against the paper's 10⁹ per replica with 60 replicas and best-30 selection.
