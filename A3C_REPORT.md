@@ -205,7 +205,29 @@ rank agents — cells trade places between snapshots, and picking a
 favourable one can "show" almost any ordering. Averaging over frame windows
 removes that, and the two tasks then give opposite answers.
 
-### Square arena (paper Fig. 2) — the grid advantage reproduces
+### Square arena (paper Fig. 2) — our build is the WRONG TASK
+
+Frozen-policy evaluation, 100 episodes (chance 3.2): grid 23.6 ± 1.7 and
+16.0 ± 2.3; place-cell 29.8 ± 5.0 and 19.0 ± 2.1 — place-cell nominally
+ahead in both seeds, the opposite of Fig. 2f.
+
+**None of this tests the paper's claim.** `rl/levels/square_arena_goal.lua`
+inherits `goal_locations_factory`, whose goal is the DM-Lab `goal` pickup
+with model `goal_object_02.md3` — **a visible, rendered object**. The
+paper's arena goal is explicitly *unmarked*: "required to explore in order
+to find an unmarked goal, paralleling the task of rodents in the classic
+Morris water maze". In a 2.75 m open room with a visible goal an agent can
+see it and walk to it — no path integration, no memory, no goal vector
+needed. That also explains the lesion null reported above.
+
+Three further mismatches: the arena is 11×11 (2.75 m) against the paper's
+10×10 (2.5 m); the agent spawns anywhere rather than in the central 6×6
+(1.5×1.5 m); and there is no single re-coloured intra-arena cue. The task is
+rebuildable — the specification is complete — and doing so is a prerequisite
+for any Fig. 2 claim from this repo.
+
+The training-curve analysis below is retained for the record but is
+superseded: it measures behaviour on a task that is not the paper's.
 
 Mean training return over 20M-frame windows, grid agent vs place-cell
 control, two independent seeds:
@@ -232,23 +254,40 @@ sample is closer to 2 seeds than 17 windows; treating seeds as the unit,
 2 of 2 favour grid, which alone is weak evidence. The frozen-policy evals
 below are the clean test.
 
-### Goal maze (paper Fig. 3) — no agent separation
+### Goal maze (paper Fig. 3) — the grid agent IS the best agent
 
-Mean training return over all windows past 40M frames (chance 7.2):
+**Frozen-policy evaluation, 100 episodes each, ~2.7×10⁸ frames per cell.
+This is the paper's own level** (`explore_goal_locations_small`; the paper's
+Data availability statement names goal-driven and goal-doors as the public
+`explore_goal_locations` / `explore_obstructed_goals`).
 
-| grid | grid lr 2e-4 | place-cell | A3C (no grid inputs) |
+| agent | ours | paper | vs chance 7.2 |
 |---|---|---|---|
-| 23.7 | 24.5 | 24.1 | 24.2 |
+| **grid** | **79.3 ± 5.4** | 346.5 | 13× |
+| **grid (lr 2e-4)** | **79.9 ± 5.5** | — | 13× |
+| A3C baseline | 60.4 ± 4.2 | 137.0 | 10× |
+| place-cell | 47.9 ± 4.1 | 258.8 | 7× |
 
-Four agents, four essentially identical numbers. The paper reports grid >
-place-cell > A3C on this family of tasks; at our scale there is no ordering
-to find. Note the A3C baseline has **no grid or goal-code inputs at all** and
-matches the grid agent exactly, so nothing about the maze result is
-attributable to the grid representation.
+- grid − place-cell = **+31.4 (4.7σ)**
+- grid − A3C = **+18.9 (2.8σ)**
+- A3C − place-cell = +12.5 (2.1σ) — the paper has place-cell *above* A3C
 
-That the two tasks disagree is itself coherent: an open arena is where a
-metric, vector-like spatial code should help most, while the maze demands
-routing around walls, for which a Euclidean goal vector is a poorer guide.
+Two independent hyperparameter draws of the grid agent landed at 79.3 and
+79.9, so the ordering is not a lucky seed. **The paper's central qualitative
+claim — the grid agent outperforms both the place-cell control and a plain
+A3C baseline — reproduces.**
+
+Caveats that cut against reading too much into the margin: our place-cell
+control was the wrong control (vision-module predictions rather than the
+paper's ground-truth codes, fixed after these runs), which makes it weaker
+than the paper's and inflates the grid−place gap; and place-cell finishing
+*below* the A3C baseline is a genuine mismatch with the paper, most likely
+for the same reason.
+
+**An earlier draft of this report claimed "no agent separation" on the maze.
+That was wrong.** It came from averaging 50-episode rolling *training*
+returns, which are far too noisy to rank agents. The frozen-policy
+evaluation is the right instrument and shows clear separation.
 
 ### The goal-code lesion: the paper's mechanism does not reproduce
 
