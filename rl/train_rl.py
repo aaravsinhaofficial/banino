@@ -89,12 +89,14 @@ def main():
                        'grid module from (velocity columns + recurrent '
                        'weights + bottleneck + heads; visual-code input '
                        'columns start at zero).')
-  ap.add_argument('--vel_encoding', choices=['raw', 'supervised'],
-                  default='raw',
-                  help="'supervised' re-encodes env velocity as (ground "
-                       "speed, sin/cos of per-step heading change) — the "
-                       "convention the supervised checkpoint was trained "
-                       "on. Use together with --init_grid_from.")
+  ap.add_argument('--vel_encoding', choices=['paper', 'raw', 'supervised'],
+                  default='paper',
+                  help="'paper' (default) feeds the grid network the "
+                       "Methods' four components [u, v, sin(w*dt), "
+                       "cos(w*dt)]; 'raw' is this repo's earlier 3-d "
+                       "[u, v, w]; 'supervised' is (ground speed, sin/cos "
+                       'of per-step heading change) for --init_grid_from. '
+                       'The GridModule and replay are sized to match.')
   ap.add_argument('--pirnn_ckpt', default=None,
                   help='(--agent pirnn) Pretrained path-integration RNN '
                        'state_dict from predictive-grid-cell-analysis; its '
@@ -133,11 +135,16 @@ def main():
   step_dt = args.action_repeat / 60.0  # seconds per decision step
 
   def encode_vel(obs):
-    """Optionally re-encode velocity in place, BEFORE replay ingestion, so
-    acting, the replay-trained grid module, and offline decoding all see
-    one convention."""
-    if args.vel_encoding == 'supervised':
-      v = obs['vel']
+    """Re-encode velocity in place, BEFORE replay ingestion, so acting,
+    the replay-trained grid module, and offline decoding all see one
+    convention."""
+    v = obs['vel']
+    if args.vel_encoding == 'paper':
+      dtheta = v[:, 2] * step_dt
+      obs['vel'] = np.stack([v[:, 0], v[:, 1],
+                             np.sin(dtheta), np.cos(dtheta)],
+                            axis=1).astype(np.float32)
+    elif args.vel_encoding == 'supervised':
       dtheta = v[:, 2] * step_dt
       obs['vel'] = np.stack([np.hypot(v[:, 0], v[:, 1]),
                              np.sin(dtheta), np.cos(dtheta)],
@@ -161,8 +168,9 @@ def main():
     pirnn_scale = BOX_HALF / env_half
     print(f'pirnn: Ng={n_grid} from {args.pirnn_ckpt}, '
           f'coord scale {pirnn_scale:.4f} (env half {env_half} m)', flush=True)
+  vel_dim = 4 if args.vel_encoding == 'paper' else 3
   vision = VisionCNN().to(dev)
-  grid = GridModule().to(dev)
+  grid = GridModule(n_vel=vel_dim).to(dev)
   policy = PolicyNet(n_actions=NUM_ACTIONS, n_grid=n_grid).to(dev)
   if args.init_grid_from:
     sd = torch.load(args.init_grid_from, map_location='cpu')
@@ -187,7 +195,8 @@ def main():
   # The pirnn agent trains no vision/grid module, so skip the replay's
   # multi-GB frame preallocation.
   replay = agent_lib.Replay(n, args.replay_per_env
-                            if args.agent != 'pirnn' else 1)
+                            if args.agent != 'pirnn' else 1,
+                            vel_dim=vel_dim)
 
   pol_state = policy.zero_state(n, dev)
   grid_state = grid.zero_state(n, dev)

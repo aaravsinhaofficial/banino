@@ -20,11 +20,11 @@ def soft_ce(logits, target):
 class Replay:
   """Per-env contiguous ring buffers so consecutive sequences can be drawn."""
 
-  def __init__(self, n_envs, cap_per_env, frame_hw=84):
+  def __init__(self, n_envs, cap_per_env, frame_hw=84, vel_dim=3):
     self.n, self.cap = n_envs, cap_per_env
     self.frames = np.zeros((n_envs, cap_per_env, frame_hw, frame_hw, 3),
                            np.uint8)
-    self.vels = np.zeros((n_envs, cap_per_env, 3), np.float32)
+    self.vels = np.zeros((n_envs, cap_per_env, vel_dim), np.float32)
     self.poss = np.zeros((n_envs, cap_per_env, 2), np.float32)
     self.hds = np.zeros((n_envs, cap_per_env), np.float32)
     self.eps = np.full((n_envs, cap_per_env), -1, np.int64)
