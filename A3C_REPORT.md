@@ -233,6 +233,64 @@ That the two tasks disagree is itself coherent: an open arena is where a
 metric, vector-like spatial code should help most, while the maze demands
 routing around walls, for which a Euclidean goal vector is a poorer guide.
 
+### The goal-code lesion: the paper's mechanism does not reproduce
+
+The paper's central mechanistic claim is vector-based navigation: the policy
+computes a goal vector by comparing the current grid code with the code
+stored when the goal was last reached. Its evidence is Extended Data Fig. 6c
+— remove the goal grid code and "performance of the grid agent drops to that
+of the baseline deep RL agent".
+
+Running that same lesion on our trained arena grid agents (zeroing the goal
+code at evaluation, 100 episodes each):
+
+| cell | intact | goal code zeroed | change |
+|---|---|---|---|
+| arena grid seed 1 | 34.6 ± 3.9 | 37.6 ± 4.1 | +3.0 (n.s.) |
+| arena grid seed 2 | 37.6 ± 4.6 | 32.5 ± 4.6 | −5.1 (0.8σ, n.s.) |
+
+**No effect in either seed.** Our grid agents do not use the goal code at
+all; whatever drives their performance, it is not vector-based navigation to
+a remembered goal.
+
+This is not explained by a degenerate spatial code. Scoring the same agents'
+grid modules on their arena ratemaps:
+
+| cell | top grid score | % units > 0.37 | paper |
+|---|---|---|---|
+| arena grid seed 1 | 1.04 | 14.1 % | 21.4 % |
+| arena grid seed 2 | 1.23 | 16.6 % | 21.4 % |
+
+Genuinely grid-like units emerge, at a fraction comparable to the paper's.
+So the representation reproduces while the *causal role* the paper assigns
+to it does not.
+
+### Deviations from the paper found by auditing SI section 3b
+
+SI Table 2 (hyperparameters) was audited before launch — that is how the
+reduction bug was found — but SI **3b** (architecture) was not, and it
+contains two real discrepancies:
+
+1. **The place-cell control was handicapped.** SI 3b gives the place-cell
+   agent "the goal predicted place cell activity vector y*, and goal head
+   direction activity vector h*". Ours was fed zeros there, while the grid
+   agent received its goal code. Every grid-vs-place comparison in this run
+   therefore used an unfair control. Fixed in `rl/train_a3c.py`, but **not
+   exercised by the cells trained here**. The lesion result above suggests
+   the handicap did not drive the arena gap — the goal code is worth nothing
+   to the grid agent either — but the comparison should be rerun to settle
+   it.
+2. **The conv net is too small.** SI 3b specifies four convolutional layers
+   (16/32/64/128 filters, 5×5, stride 2, padding 2) followed by a 256-unit
+   fully connected layer, used for both the vision module and the
+   actor-critic learner with unshared weights. `rl/nets.py` uses a two-layer
+   Atari-style stack (16@8×8 s4, 32@4×4 s2). Not changed mid-run; it limits
+   every agent equally, so it does not explain the *relative* results, but it
+   plausibly caps absolute performance.
+
+The A3C baseline is correct as specified ("trained without any grid or place
+cell input").
+
 ### Absolute performance vs the paper
 
 All agents learn — 3–7× their measured chance lines, versus the previous
