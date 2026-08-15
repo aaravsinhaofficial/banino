@@ -76,6 +76,34 @@ def fmt_score(cell):
   return f"{ev['mean_score']:.1f} ± {ev['sem']:.1f}"
 
 
+def load_chance(rl_dir, name='untrained_control'):
+  """The untrained-network score under the same 100-episode protocol.
+
+  Without it a score cannot be called learning: on the goal maze an
+  untrained network scores ~7, which is where every agent in the previous
+  full-scale run landed.
+  """
+  p = os.path.join(rl_dir, name, 'eval_scores.json')
+  return json.load(open(p)) if os.path.exists(p) else None
+
+
+def verdict(cell, chance):
+  """Is this cell above the untrained baseline by more than 2 sigma?"""
+  ev = cell.get('eval')
+  if not ev or not chance:
+    return 'no eval'
+  diff = ev['mean_score'] - chance['mean_score']
+  sigma = (ev['sem'] ** 2 + chance['sem'] ** 2) ** 0.5
+  if sigma == 0:
+    return 'n/a'
+  z = diff / sigma
+  if z >= 2:
+    return f'LEARNED (+{diff:.1f}, {z:.1f} sigma)'
+  if z <= -2:
+    return f'below chance ({z:.1f} sigma)'
+  return f'at chance ({z:+.1f} sigma)'
+
+
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument('--rl', default='rl_runs')
@@ -87,19 +115,28 @@ def main():
   dirs = sorted(d for d in glob.glob(os.path.join(args.rl, args.prefix + '*'))
                 if os.path.isdir(d))
   cells = [load_cell(d) for d in dirs]
-  res = {'paper': PAPER, 'sync_a2c': SYNC_A2C,
+  chance = load_chance(args.rl)
+  chance_sa = load_chance(args.rl, 'untrained_seekavoid')
+  res = {'paper': PAPER, 'sync_a2c': SYNC_A2C, 'chance_goal_maze': chance,
+         'chance_seekavoid': chance_sa,
          'async_a3c': {c['name']: c for c in cells}}
   with open(args.out, 'w') as f:
     json.dump(res, f, indent=1)
 
-  lines = ['# Async A3C vs synchronous A2C vs paper', '',
-           '| cell | agent | workers | frames | eval score (100 ep) | '
-           'train return (tail) | peak |', '|---|---|---|---|---|---|---|']
+  lines = ['# Async A3C vs synchronous A2C vs paper', '']
+  if chance:
+    lines += [f"**Chance line (untrained network, 100 episodes): "
+              f"{chance['mean_score']:.1f} ± {chance['sem']:.1f}** on the goal "
+              'maze. Any score not clearly above this is not navigation.', '']
+  lines += ['| cell | agent | workers | frames | eval score (100 ep) | '
+            'vs chance | train return (tail) | peak |',
+            '|---|---|---|---|---|---|---|---|']
   for c in cells:
     cfg = c.get('config', {})
+    ch = chance_sa if 'seekavoid' in c['name'] else chance
     lines.append(
         f"| {c['name']} | {cfg.get('agent', '?')} | {cfg.get('workers', '?')} "
-        f"| {c.get('frames', 0):,} | {fmt_score(c)} "
+        f"| {c.get('frames', 0):,} | {fmt_score(c)} | {verdict(c, ch)} "
         f"| {c.get('train_return_tail_mean', 'n/a')} "
         f"| {c.get('train_return_peak', 'n/a')} |")
   lines += ['', '## Benchmarks', '',
@@ -109,6 +146,10 @@ def main():
             f"| Sync A2C, 1e9 frames | {SYNC_A2C['goal_maze']['grid'][0]} | "
             f"{SYNC_A2C['goal_maze']['placecell'][0]} | "
             f"{SYNC_A2C['goal_maze']['a3c'][0]} |"]
+  if chance:
+    lines.append(f"| **Untrained network (chance)** | "
+                 f"{chance['mean_score']:.1f} | {chance['mean_score']:.1f} | "
+                 f"{chance['mean_score']:.1f} |")
   by_agent = {}
   for c in cells:
     by_agent.setdefault(c.get('config', {}).get('agent'), []).append(c)
