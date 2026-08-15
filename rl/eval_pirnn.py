@@ -72,16 +72,19 @@ def main():
     ckpt_path = args.ckpt
 
   dev = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+  torch.manual_seed(args.base_seed)  # reproducible sampling + re-anchors
   units = parse_units(args.ablate)
   pirnn = PIRNN(args.pirnn_ckpt or cfg['pirnn_ckpt'], device=dev,
                 ablate_units=units, ablation_mode=args.ablation_mode)
   env_half = cfg.get('pirnn_env_half') or cfg['arena_half_m']
   scale = BOX_HALF / env_half
 
-  policy = PolicyNet(n_grid=pirnn.Ng).to(dev)
   ck = torch.load(ckpt_path, map_location=dev)
+  n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
+  policy = PolicyNet(n_actions=n_actions, n_grid=pirnn.Ng).to(dev)
   policy.load_state_dict(ck['policy'])
   policy.eval()
+  reward_clip = cfg.get('reward_clip', 0.0) or 0.0
 
   n = args.n_envs
   venv = SubprocVecEnv(
@@ -118,11 +121,14 @@ def main():
                                      prev_reward, pol_state)
       a = torch.distributions.Categorical(logits=pi).sample()
       obs, rewards, dones = venv.step(a.cpu().numpy())
-      r_t = torch.as_tensor(rewards, device=dev)
+      r_raw = torch.as_tensor(rewards, device=dev)
+      # prev_reward is a policy input: clip to the scale it was trained on.
+      r_t = r_raw.clamp(-reward_clip, reward_clip) if reward_clip > 0 \
+          else r_raw
       d_t = torch.as_tensor(dones.astype(np.float32), device=dev)
-      hit = (r_t > 0).float().unsqueeze(1)
+      hit = (r_raw > 0).float().unsqueeze(1)
       goal_code = hit * g.detach() + (1 - hit) * goal_code
-      reinit = (r_t > 0) | (d_t > 0)
+      reinit = (r_raw > 0) | (d_t > 0)
       ep_return += rewards
       for i in range(n):
         if dones[i]:

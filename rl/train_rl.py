@@ -24,6 +24,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modern import targets as targets_lib          # noqa: E402
 from rl import agent as agent_lib                  # noqa: E402
+from rl.env import NUM_ACTIONS                     # noqa: E402
 from rl.nets import GridModule, PolicyNet, VisionCNN  # noqa: E402
 from rl.pi_rnn import BOX_HALF, PIRNN              # noqa: E402
 from rl.vec_env import SubprocVecEnv               # noqa: E402
@@ -96,6 +97,13 @@ def main():
   ap.add_argument('--pirnn_env_half', type=float, default=None,
                   help='(--agent pirnn) Env half-extent (m) mapped onto the '
                        "RNN's native [-1.1, 1.1] m box; default arena_half_m.")
+  ap.add_argument('--reward_clip', type=float, default=1.0,
+                  help='Clip the reward used for LEARNING (returns + the '
+                       'prev_reward policy input) to +/- this; 0 = off. The '
+                       'goal levels pay +10, so unclipped value targets '
+                       'dominate the grad-norm-40 clip and swamp the policy '
+                       'term; clipping to 1 is the standard A3C treatment. '
+                       'Logged returns and goal detection stay raw.')
   ap.add_argument('--pirnn_reanchor', type=float, default=0.05,
                   help='(--agent pirnn) Per-step probability of re-anchoring '
                        'the RNN state from the place-cell code at the true '
@@ -150,7 +158,7 @@ def main():
           f'coord scale {pirnn_scale:.4f} (env half {env_half} m)', flush=True)
   vision = VisionCNN().to(dev)
   grid = GridModule().to(dev)
-  policy = PolicyNet(n_grid=n_grid).to(dev)
+  policy = PolicyNet(n_actions=NUM_ACTIONS, n_grid=n_grid).to(dev)
   if args.init_grid_from:
     sd = torch.load(args.init_grid_from, map_location='cpu')
     new = grid.state_dict()
@@ -288,18 +296,20 @@ def main():
       obs, rewards, dones = venv.step(a.cpu().numpy())
       obs = encode_vel(obs)
       frames_done += n * args.action_repeat  # env workers step with repeat 4
-      r_t = torch.as_tensor(rewards, device=dev)
+      r_raw = torch.as_tensor(rewards, device=dev)
+      r_t = r_raw.clamp(-args.reward_clip, args.reward_clip) \
+          if args.reward_clip > 0 else r_raw
       d_t = torch.as_tensor(dones.astype(np.float32), device=dev)
       roll['rewards'].append(r_t)
       roll['dones'].append(d_t)
 
-      # Goal-code capture: store the grid code at reward pickup.
-      hit = (r_t > 0).float().unsqueeze(1)
+      # Goal-code capture: store the grid code at reward pickup (raw reward).
+      hit = (r_raw > 0).float().unsqueeze(1)
       goal_code = hit * g.detach() + (1 - hit) * goal_code
       if args.agent == 'pirnn':
         # Reward respawns the agent (teleport) and done auto-resets the
         # episode: re-anchor the RNN state from place cells next step.
-        pirnn_reinit = (r_t > 0) | (d_t > 0)
+        pirnn_reinit = (r_raw > 0) | (d_t > 0)
 
       ep_return += rewards
       for i, d in enumerate(dones):
@@ -343,10 +353,16 @@ def main():
     a_all = torch.stack(roll['actions'])   # [T,n]
     dist = torch.distributions.Categorical(logits=pi_all)
     adv = (returns - v_all).detach()
-    pol_loss = -(dist.log_prob(a_all) * adv).mean()
-    val_loss = 0.5 * (returns.detach() - v_all).pow(2).mean()
-    ent = dist.entropy().mean()
-    loss = pol_loss + args.value_coef * val_loss - args.entropy * ent
+    # Reduction per rl/train_a3c.py:305-315: Mnih et al. 2016 ACCUMULATE the
+    # per-step losses along the rollout (sum over T), and SI Table 2's
+    # constants (lr, entropy 8e-5, grad-clip 40) assume that scaling. The
+    # old .mean() divided every gradient by T*n, which is why no synchronous
+    # run ever left a uniform policy. Sum over time, mean over the env batch.
+    pol_loss = -(dist.log_prob(a_all) * adv).sum(0).mean()
+    val_loss = 0.5 * (returns.detach() - v_all).pow(2).sum(0).mean()
+    ent_sum = dist.entropy().sum(0).mean()
+    ent = ent_sum / T                      # per-step entropy, for logging
+    loss = pol_loss + args.value_coef * val_loss - args.entropy * ent_sum
     pol_opt.zero_grad(set_to_none=True)
     loss.backward()
     torch.nn.utils.clip_grad_norm_(policy.parameters(), 40.0)
