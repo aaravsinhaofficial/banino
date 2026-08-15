@@ -56,6 +56,11 @@ def main():
   ap.add_argument('--tag', default='sham')
   ap.add_argument('--pirnn_ckpt', default=None,
                   help='override the RNN checkpoint recorded in config.json')
+  ap.add_argument('--random_policy', action='store_true',
+                  help='Chance line: keep the policy at its (seeded) random '
+                       'init instead of loading the checkpoint — an untrained '
+                       'network explores far better than uniform-random '
+                       'actions, so this is the floor scores must beat.')
   ap.add_argument('--out', default=None)
   args = ap.parse_args()
 
@@ -82,7 +87,10 @@ def main():
   ck = torch.load(ckpt_path, map_location=dev)
   n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
   policy = PolicyNet(n_actions=n_actions, n_grid=pirnn.Ng).to(dev)
-  policy.load_state_dict(ck['policy'])
+  if args.random_policy:
+    ckpt_path = f'untrained(seed {args.base_seed}, arch from {ckpt_path})'
+  else:
+    policy.load_state_dict(ck['policy'])
   policy.eval()
   reward_clip = cfg.get('reward_clip', 0.0) or 0.0
 
