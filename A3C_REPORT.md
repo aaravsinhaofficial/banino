@@ -132,27 +132,35 @@ pinned at exactly the maximum for the whole of the previous 10⁹-frame run.
 - **Goal maze (paper Fig. 3).** All four cells climb out of the untrained
   band at ~8–9M frames; 12–18 by 25M against chance 7.2. No agent separation
   yet (the paper's central claim), and it is far too early to expect one.
-- **Square arena (paper Fig. 2) — an early grid advantage that does not
-  hold.** The grid agent learns much faster than the place-cell control at
-  first (peak 37.8 at 23M frames versus ~17 for place-cell, better than 2×),
-  which looked like a clean reproduction of Fig. 2f. It is not. The grid
-  agent then destabilises — 33 at 51M, 27 at 63M, 19.8 at 74M — while
-  place-cell climbs monotonically to the same 19.8, and the two finish at
-  parity. Policy entropy tracks it: the grid agent's *rises* from 1.06 back
-  to 1.48 over the decline, i.e. it partially unlearns.
+- **Square arena (paper Fig. 2) — large swings, no stable ranking.** The grid
+  agent's training return oscillates violently: 37.8 at 23M frames, down to
+  19.8 at 74M, back up to 44.4 at 108M. The place-cell control is far
+  steadier (17 → 21 → 19). At some checkpoints the grid agent is 2–2.6× the
+  control and it looks like a clean reproduction of Fig. 2f; at others they
+  are at parity.
 
-  A second independent seed, launched specifically to test the separation,
-  does not reproduce it either: at matched ~20M frames seed 1 gave grid 23.5
-  vs place-cell 16.9, while seed 2 gives 18.7 vs 17.8.
+  A second independent seed does not track the first: at ~20M frames seed 1
+  gave grid 23.5 vs place-cell 16.9, while seed 2 gave 18.7 vs 17.8, and at
+  ~60M seed 2 has place-cell marginally *ahead* (25.6 vs 24.4).
 
-  A plausible mechanism is visible in the logs: the grid module is retrained
-  from replay throughout training and its loss keeps oscillating (4.4–5.9),
-  so the policy's input representation shifts underneath a policy that has
-  already fitted to it. The place-cell agent's visual-code input drifts less.
+  The maze cells swap rank the same way — grid led at 108M (20.8 vs 16.2),
+  and at 142M place-cell and the lr-2e-4 grid draw lead instead (20.8 vs
+  13.8).
 
-  This is exactly the failure mode that produced the previous report's false
-  conclusion, caught this time only because a replicate seed was run. Any
-  claim from a single seed here would have been wrong.
+  **The 50-episode rolling training return is too noisy to rank agents**, and
+  any claim drawn from a single snapshot of it — in either direction — would
+  be unsound. Only the 100-episode frozen-policy evals with error bars can
+  settle the ordering, and with 1–2 seeds per configuration they will only
+  resolve large gaps. This is the same trap that produced the previous
+  report's false agent ordering; it is avoided here by having measured
+  chance lines, replicate seeds, and a held-out eval protocol.
+
+  Candidate mechanism for the instability, not tested for want of time and
+  vCPU quota: the grid module is retrained from replay throughout (its loss
+  still oscillates 4.4–5.9 late in training), so the policy's input
+  representation keeps shifting under a policy already fitted to it.
+  `rl/train_a3c.py --freeze_grid_after N` is implemented to test exactly
+  this and is the obvious follow-up.
 
 ![learning curves](report/fig_a3c.png)
 

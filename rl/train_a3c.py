@@ -384,7 +384,11 @@ def trainer_proc(cfg, shared, ctrl, kind):
       if replay.total_steps() < 50_000:
         time.sleep(1.0)
         continue
-      if done < ctrl['frames'].value // per_frames:
+      frozen = (kind == 'grid' and cfg.get('freeze_grid_after')
+                and ctrl['frames'].value >= cfg['freeze_grid_after'])
+      if frozen:
+        time.sleep(1.0)
+      elif done < ctrl['frames'].value // per_frames:
         if kind == 'vision':
           loss = agent_lib.vision_update(vision, opt, replay, pc_ens, hd_ens,
                                          rng, 'cpu')
@@ -472,6 +476,12 @@ def main():
                        '(~50 at a reward step) dominate the grad-norm-40 clip '
                        'and swamp the policy term; clipping to 1 is the '
                        'standard A3C treatment.')
+  ap.add_argument('--freeze_grid_after', type=int, default=0,
+                  help='DIAGNOSTIC, not paper-faithful (the paper trains the '
+                       'grid network throughout): stop updating the grid '
+                       'module past this frame count. Tests whether the '
+                       "grid agents' mid-training regression is caused by "
+                       "the policy's input representation drifting under it.")
   ap.add_argument('--n_actions', type=int, default=0,
                   help='0 = the env module\'s action-set size.')
   ap.add_argument('--bandit', action='store_true',
