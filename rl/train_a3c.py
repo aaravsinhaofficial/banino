@@ -143,7 +143,9 @@ def _pull(dst, src):
 
 
 def _make_env(cfg, rank):
-  if cfg['fake']:
+  if cfg.get('bandit'):
+    from rl.bandit_env import BanditEnv as Env
+  elif cfg['fake']:
     from rl.fake_env import FakeEnv as Env
   else:
     from rl.env import LabEnv as Env
@@ -294,10 +296,19 @@ def actor_proc(rank, cfg, shared, ctrl):
       ret_t = torch.tensor(returns, dtype=torch.float32)
       dist = torch.distributions.Categorical(logits=pi_all)
       adv = (ret_t - v_all).detach()
-      pol_loss = -(dist.log_prob(a_all) * adv).mean()
-      val_loss = 0.5 * (ret_t - v_all).pow(2).mean()
-      ent = dist.entropy().mean()
-      loss = (pol_loss + cfg['value_coef'] * val_loss - cfg['entropy'] * ent)
+      # Sum over the rollout, as in Mnih et al. 2016 (gradients are
+      # ACCUMULATED over the BPTT window, not averaged). SI Table 2's
+      # constants are written for this scaling: entropy 8e-5 summed over
+      # 100 steps is a standard ~8e-3 per-step bonus, and baseline cost
+      # 0.5 is the usual A3C value. Averaging instead divides every
+      # gradient by 100, which is why the policy never left uniform.
+      logp = dist.log_prob(a_all)
+      pol_loss = -(logp * adv).sum()
+      val_loss = 0.5 * (ret_t - v_all).pow(2).sum()
+      ent_sum = dist.entropy().sum()
+      ent = ent_sum / T                     # per-step, for logging
+      loss = (pol_loss + cfg['value_coef'] * val_loss
+              - cfg['entropy'] * ent_sum)
       for p in policy_l.parameters():
         p.grad = None
       loss.backward()
@@ -448,6 +459,9 @@ def main():
                        '0 = frames budget only.')
   ap.add_argument('--seed', type=int, default=1)
   ap.add_argument('--fake', action='store_true')
+  ap.add_argument('--bandit', action='store_true',
+                  help='Dense-reward probe env (rl/bandit_env.py): a unit '
+                       'test that the policy-gradient path can learn at all.')
   ap.add_argument('--resume', action='store_true')
   ap.add_argument('--reset_grid', action='store_true')
   args = ap.parse_args()
