@@ -63,6 +63,10 @@ def main():
   n_actions = ck['policy']['pi.weight'].shape[0]  # match the trained head
   # Grid LSTM input width tells us the velocity encoding the run used.
   n_vel = ck['grid']['cell.weight_ih'].shape[1] - 256 - 12
+  # The env's action set must match the trained policy head: these runs span
+  # both the paper's six-action set and this repo's earlier eight. Set it
+  # before SubprocVecEnv spawns, since workers read it at import time.
+  os.environ['BANINO_ACTION_SET'] = '8' if n_actions == 8 else '6'
   vision, grid, policy = VisionCNN().to(dev), GridModule(n_vel=n_vel).to(dev), \
       PolicyNet(n_actions=n_actions).to(dev)
   vision.load_state_dict(ck['vision'])

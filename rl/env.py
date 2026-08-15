@@ -56,17 +56,12 @@ ACTIONS = [
     ('strafe_left', _act(strafe=-1)),
     ('strafe_right', _act(strafe=1)),
 ]
-if os.environ.get('BANINO_ACTION_SET') == '8':
+if os.environ.get('BANINO_ACTION_SET', '6') == '8':
   ACTIONS = ACTIONS + [
       ('forward_turn_left', _act(look_lr=-_ROT_PIX, move=1)),
       ('forward_turn_right', _act(look_lr=_ROT_PIX, move=1)),
   ]
 
-# The paper's actor is "a linear layer with six units" (Methods, agent
-# architecture), i.e. six discrete actions; it does not say which six.
-# BANINO_ACTION_SET=6 truncates to the first six — the set this repo used
-# before 2026-08-15 — so results from the two action sets can be compared
-# against matched baselines.
 NUM_ACTIONS = len(ACTIONS)
 
 # RGB observation fallbacks: (name, planar layout?).
